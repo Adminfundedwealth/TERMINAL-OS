@@ -2,8 +2,12 @@ import "server-only";
 import { createClient } from "@supabase/supabase-js";
 
 export function createServerSupabaseClient() {
-  const url = process.env.TERMINAL_SUPABASE_URL ?? process.env.NEXT_PUBLIC_TERMINAL_SUPABASE_URL;
-  const secret = process.env.TERMINAL_SUPABASE_SECRET_KEY;
+  const url =
+    process.env.TERMINAL_SUPABASE_URL ??
+    process.env.NEXT_PUBLIC_TERMINAL_SUPABASE_URL ??
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const secret =
+    process.env.TERMINAL_SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SECRET_KEY;
 
   // In dev mode with placeholder values, return a dummy client that won't crash
   if (!url || url.includes("placeholder") || !secret || secret.includes("placeholder")) {
@@ -16,6 +20,7 @@ export function createServerSupabaseClient() {
           order: () => ({ data: [], error: null, range: () => ({ data: [], error: null, count: 0 }) }),
           limit: () => ({ data: [], error: null }),
           maybeSingle: () => ({ data: null, error: null }),
+          not: () => ({ data: null, error: null, count: 0 }),
         }),
         insert: () => ({ select: () => ({ single: () => ({ data: null, error: null }) }) }),
         update: () => ({ eq: () => ({ select: () => ({ single: () => ({ data: null, error: null }) }) }) }),
