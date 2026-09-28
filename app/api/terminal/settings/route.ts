@@ -28,15 +28,14 @@ export const PATCH = withAuth(PERMISSIONS.SETTINGS_MANAGE, async ({ req, employe
     }
 
     const db = createServerSupabaseClient();
-    const settingUpdate = {
+    const settingUpdate: Record<string, unknown> = {
       value: parsed.data.value,
       updated_by: employee.id,
       updated_at: new Date().toISOString(),
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await db
       .from("terminal_settings")
-      .update(settingUpdate as any)
+      .update(settingUpdate)
       .eq("id", parsed.data.id)
       .select()
       .single();

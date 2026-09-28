@@ -6,7 +6,7 @@ import { getInstrumentStats } from "@/server/services/instruments";
 import { ListFilter } from "lucide-react";
 
 export const metadata: Metadata = { title: "Instruments" };
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 export default async function InstrumentsPage() {
   const stats = await getInstrumentStats();

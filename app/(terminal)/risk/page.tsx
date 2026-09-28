@@ -6,7 +6,9 @@ import { RecentRiskEvents } from "@/components/dashboard/recent-risk-events";
 import { getRiskDashboardSummary } from "@/server/services/risk";
 
 export const metadata: Metadata = { title: "Risk Management" };
-export const revalidate = 30;
+// Force dynamic rendering — this page requires server-side Supabase env vars
+// that are not available at static build time.
+export const dynamic = "force-dynamic";
 
 export default async function RiskPage() {
   const summary = await getRiskDashboardSummary();
