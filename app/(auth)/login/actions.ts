@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { isDevMode } from "@/lib/dev/mock-employee";
+import { getTerminalOsAdminRole } from "@/lib/auth/admin-access";
 
 const LoginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -33,24 +33,9 @@ export async function loginAction(
     };
   }
 
-  // ── DEV MODE: accept any credentials ──────────────────────
-  if (isDevMode()) {
-    // Set a simple dev session cookie and redirect
-    const { cookies } = await import("next/headers");
-    const cookieStore = await cookies();
-    cookieStore.set("dev_session", "active", {
-      httpOnly: true,
-      path: "/",
-      maxAge: 60 * 60 * 8, // 8 hours
-    });
-    redirect("/dashboard");
-  }
-
-  // ── PRODUCTION: real Supabase auth ────────────────────────
   const { createRouteHandlerSupabaseClient } = await import(
     "@/lib/supabase/route-handler-client"
   );
-  const { createServerSupabaseClient } = await import("@/lib/supabase/server");
   const { recordEmployeeLogin } = await import("@/lib/auth/session");
   const { writeActivityLog, serverLog } = await import("@/lib/logger");
 
@@ -65,28 +50,14 @@ export async function loginAction(
       return { error: "Invalid email or password." };
     }
 
-    const adminClient = createServerSupabaseClient();
-    const { data: employeeRow } = await adminClient
-      .from("employees")
-      .select("id, status")
-      .eq("id", data.user.id)
-      .single();
-
-    const employee = employeeRow as { id: string; status: string } | null;
-
-    if (!employee) {
+    if (!getTerminalOsAdminRole(data.user.email)) {
       await client.auth.signOut();
-      return { error: "Access denied. No employee record found." };
+      return { error: "Access denied. This account is not authorized for Terminal OS." };
     }
 
-    if (employee.status !== "ACTIVE") {
-      await client.auth.signOut();
-      return { error: "Your account is not active. Contact your administrator." };
-    }
-
-    await recordEmployeeLogin(employee.id);
+    await recordEmployeeLogin(data.user.id);
     await writeActivityLog({
-      employee_id: employee.id,
+      employee_id: data.user.id,
       action: "LOGIN",
       module: "auth",
       result: "SUCCESS",
@@ -105,18 +76,16 @@ export async function forgotPasswordAction(
   const email = String(formData.get("email") ?? "").trim();
   if (!email) return { fieldErrors: { email: ["Email is required"] } };
 
-  if (!isDevMode()) {
-    try {
-      const { createRouteHandlerSupabaseClient } = await import(
-        "@/lib/supabase/route-handler-client"
-      );
-      const client = await createRouteHandlerSupabaseClient();
-      await client.auth.resetPasswordForEmail(email, {
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/reset-password`,
-      });
-    } catch {
-      // Intentionally silent
-    }
+  try {
+    const { createRouteHandlerSupabaseClient } = await import(
+      "@/lib/supabase/route-handler-client"
+    );
+    const client = await createRouteHandlerSupabaseClient();
+    await client.auth.resetPasswordForEmail(email, {
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/reset-password`,
+    });
+  } catch {
+    // Intentionally silent
   }
 
   return {};

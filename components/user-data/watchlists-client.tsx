@@ -47,13 +47,13 @@ export function WatchlistsClient() {
       <DataTable
         columns={[
           { key: "id", header: "ID", render: (r) => <span className="font-mono text-xs text-muted-foreground">{String(r.id).slice(0, 8)}…</span> },
-          { key: "owner_user_id", header: "Owner", render: (r) => <span className="font-mono text-xs">{String(r.owner_user_id).slice(0, 10)}…</span> },
+          { key: "trader_id", header: "Trader", render: (r) => <span className="font-mono text-xs">{String(r.trader_id).slice(0, 10)}…</span> },
           { key: "name", header: "Watchlist", render: (r) => <span className="font-medium">{String(r.name)}</span> },
           {
             key: "items",
             header: "Symbols",
             render: (r) => {
-              const items = Array.isArray(r.watchlist_items) ? r.watchlist_items as Record<string, unknown>[] : [];
+              const items = Array.isArray(r.items) ? r.items as Record<string, unknown>[] : [];
               return <span className="text-xs text-muted-foreground">{items.map((i) => String(i.symbol)).join(", ") || "—"}</span>;
             },
           },

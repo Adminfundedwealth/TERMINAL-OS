@@ -7,6 +7,14 @@
 // EMPLOYEE / AUTH
 // -------------------------------------------------------
 
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
 export type EmployeeRole =
   | "SUPER_ADMIN"
   | "ADMIN"
@@ -213,48 +221,37 @@ export interface RiskEvent {
   trading_account_id: string;
   event_type: RiskEventType;
   severity: RiskEventSeverity;
-  metric: string;
-  threshold: number;
-  actual_value: number;
-  action_taken: string | null;
-  created_by: string | null;
+  challenge_id: string | null;
+  rule_type: string;
+  threshold_value: number | null;
+  actual_value: number | null;
+  metadata: Record<string, unknown>;
+  acknowledged: boolean;
   created_at: string;
 }
 
-export interface AccountMetricSnapshot {
+export interface AccountMetric {
   id: string;
   trading_account_id: string;
-  balance: number;
-  equity: number;
-  daily_pnl: number;
-  daily_loss_used: number;
-  current_drawdown: number;
-  max_drawdown_reached: number;
-  exposure: number;
-  open_positions_count: number;
-  risk_status: RiskStatus;
-  snapshot_at: string;
-}
-
-// -------------------------------------------------------
-// DAILY PERFORMANCE
-// -------------------------------------------------------
-
-export interface DailyPerformance {
-  id: string;
-  trading_account_id: string;
+  challenge_id: string | null;
   date: string;
-  opening_balance: number;
-  closing_balance: number;
-  daily_pnl: number;
+  starting_balance: number;
+  ending_balance: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
   total_trades: number;
   winning_trades: number;
   losing_trades: number;
   gross_profit: number;
   gross_loss: number;
-  fees: number;
-  created_at: string;
-  updated_at: string;
+  max_drawdown: number;
+  daily_loss: number;
+  peak_balance: number;
+  avg_win: number | null;
+  avg_loss: number | null;
+  largest_win: number | null;
+  largest_loss: number | null;
+  profit_factor: number | null;
 }
 
 // -------------------------------------------------------
@@ -296,19 +293,15 @@ export interface Instrument {
 
 export interface Watchlist {
   id: string;
-  owner_user_id: string;
+  trader_id: string;
   name: string;
+  color: string;
+  icon: string;
+  items: Json;
+  sort_order: number;
+  is_default: boolean;
   created_at: string;
   updated_at: string;
-  items?: WatchlistItem[];
-}
-
-export interface WatchlistItem {
-  id: string;
-  watchlist_id: string;
-  symbol: string;
-  exchange: string;
-  added_at: string;
 }
 
 // -------------------------------------------------------

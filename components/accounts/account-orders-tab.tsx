@@ -1,32 +1,31 @@
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createCanonicalAdminClient } from "@/lib/supabase/canonical-admin";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDateTime } from "@/lib/utils";
 import Link from "next/link";
 import { ClipboardList } from "lucide-react";
 
-// Uses trading_orders — NOT the payment `orders` table
 type OrderRow = {
   id: string;
   symbol: string;
   segment: string;
   side: string;
   order_type: string;
-  product_type: string;
-  qty: number;
+  product: string;
+  quantity: number;
   price: number | null;
   status: string;
-  placed_at: string;
+  submitted_at: string;
 };
 
 export async function AccountOrdersTab({ accountId }: { accountId: string }) {
-  const db = createServerSupabaseClient();
+  const db = createCanonicalAdminClient();
   const { data } = await db
-    .from("trading_orders")
-    .select("id, symbol, segment, side, order_type, product_type, qty, price, status, placed_at")
-    .eq("trading_account_id", accountId)
-    .order("placed_at", { ascending: false })
-    .limit(20);
+    .from("orders")
+    .select("id, symbol, segment, side, order_type, product, quantity, price, status, submitted_at")
+    .eq("account_id", accountId)
+    .order("submitted_at", { ascending: false })
+    .range(0, 19);
 
   const orders = (data ?? []) as OrderRow[];
 
@@ -59,11 +58,11 @@ export async function AccountOrdersTab({ accountId }: { accountId: string }) {
                 </span>
               </td>
               <td className="px-3 py-2 text-muted-foreground">{o.order_type}</td>
-              <td className="px-3 py-2 text-muted-foreground">{o.product_type}</td>
-              <td className="px-3 py-2 tabular-nums">{o.qty}</td>
+              <td className="px-3 py-2 text-muted-foreground">{o.product}</td>
+              <td className="px-3 py-2 tabular-nums">{o.quantity}</td>
               <td className="px-3 py-2 tabular-nums">{o.price ?? "MKT"}</td>
               <td className="px-3 py-2"><StatusBadge status={o.status} /></td>
-              <td className="px-3 py-2 text-muted-foreground">{formatDateTime(o.placed_at)}</td>
+              <td className="px-3 py-2 text-muted-foreground">{formatDateTime(o.submitted_at)}</td>
             </tr>
           ))}
         </tbody>

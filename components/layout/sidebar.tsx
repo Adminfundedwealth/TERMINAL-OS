@@ -108,6 +108,12 @@ const NAV_SECTIONS: NavSection[] = [
         permission: PERMISSIONS.RISK_VIEW,
       },
       {
+        label: "Rule Management",
+        href: "/rules",
+        icon: ShieldAlert,
+        permission: PERMISSIONS.RISK_INTERVENE,
+      },
+      {
         label: "Daily Performance",
         href: "/performance",
         icon: BarChart3,

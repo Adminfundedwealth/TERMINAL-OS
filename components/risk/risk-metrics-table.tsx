@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { DataTable } from "@/components/shared/data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
-import { formatCurrency, formatPercent, formatRelativeTime } from "@/lib/utils";
+import { formatCurrency, formatRelativeTime } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 
 const RISK_STATUS_OPTIONS = ["", "NORMAL", "WARNING", "CRITICAL", "BREACHED", "RESTRICTED"];
@@ -78,7 +78,7 @@ export function RiskMetricsTable() {
             className: "text-right",
             render: (r) => {
               const v = Number(r.daily_pnl);
-              return (
+              return v == null ? <span>—</span> : (
                 <span className={`tabular-nums font-medium ${v >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
                   {formatCurrency(v)}
                 </span>
@@ -89,24 +89,25 @@ export function RiskMetricsTable() {
             key: "daily_loss_used",
             header: "Loss Used",
             className: "text-right",
-            render: (r) => <span className="tabular-nums text-red-600 dark:text-red-400">{formatCurrency(Number(r.daily_loss_used))}</span>,
+            render: (r) => <span className="tabular-nums text-red-600 dark:text-red-400">{formatCurrency(r.daily_loss_used == null ? null : Number(r.daily_loss_used))}</span>,
           },
           {
             key: "current_drawdown",
             header: "Drawdown",
             className: "text-right",
-            render: (r) => <span className="tabular-nums">{formatPercent(Number(r.current_drawdown))}</span>,
+            render: (r) => <span className="tabular-nums">{formatCurrency(r.current_drawdown == null ? null : Number(r.current_drawdown))}</span>,
           },
           {
             key: "exposure",
             header: "Exposure",
             className: "text-right",
-            render: (r) => <span className="tabular-nums">{formatCurrency(Number(r.exposure))}</span>,
+            render: (r) => <span className="tabular-nums">{r.exposure == null ? "—" : formatCurrency(Number(r.exposure))}</span>,
           },
           {
             key: "open_positions_count",
             header: "Positions",
             className: "text-right tabular-nums",
+            render: (r) => <span>{r.open_positions_count == null ? "—" : String(r.open_positions_count)}</span>,
           },
           {
             key: "risk_status",
@@ -123,7 +124,7 @@ export function RiskMetricsTable() {
         loading={isLoading}
         keyField="id"
         emptyTitle="No metric snapshots found"
-        emptyDescription="Account metric snapshots will appear once the risk service runs."
+        emptyDescription="Canonical account metrics will appear once metric data is available."
         total={total}
         page={page}
         pageSize={25}

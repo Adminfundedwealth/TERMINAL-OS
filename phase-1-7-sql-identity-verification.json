@@ -1,0 +1,81 @@
+{
+  "report": "PHASE_1_7_SQL_IDENTITY_VERIFICATION",
+  "canonical_project": "nysrxvpjdlvzvcawysvh",
+  "read_only": true,
+  "writes_performed": 0,
+  "sql_access": {
+    "available": false,
+    "endpoint": "/rest/v1/rpc/exec_sql",
+    "probe": "select 1 as read_only_probe;",
+    "result": "HTTP 404 PGRST202: public.exec_sql was not found in the schema cache"
+  },
+  "auth_to_public_users": {
+    "status": "UNVERIFIED",
+    "auth_users_examined": 434,
+    "public_users_examined": 424,
+    "exact_id_matches": 0,
+    "email_candidates": 405,
+    "email_is_not_confirmation": true,
+    "foreign_key_status": "UNVERIFIED"
+  },
+  "public_users_to_terminal_traders": {
+    "status": "PARTIALLY_VERIFIED_BY_REST",
+    "confirmed": 128,
+    "unresolved": 4,
+    "ambiguous": 0,
+    "orphaned": 0,
+    "foreign_key_status": "UNVERIFIED"
+  },
+  "unresolved_trader_external_ids": [
+    "inttest-user-1783239091589",
+    "test-user-runtime-001",
+    "ext_59e4a6b77dc1a989",
+    "ext_2b92969925dc16ab"
+  ],
+  "staff": {
+    "rows": 1,
+    "classification": "UNRESOLVED",
+    "direct_auth_id_matches": 0,
+    "foreign_key_status": "UNVERIFIED",
+    "application_code": "lib/auth/session.ts checks auth.users.id against staff_members.id"
+  },
+  "account_ownership": {
+    "total_accounts": 102,
+    "valid_trader_relationships": 102,
+    "orphan_accounts": 0,
+    "accounts_attached_to_unresolved_traders": 13,
+    "affected_accounts_eligible_for_automatic_migration": false,
+    "affected_accounts": [
+      { "id": "10253556-302d-4adb-bdcf-e1056b5fbd3e", "account_code": "FW-P1-MR7KNXEI", "trader_id": "f825ff08-4431-448c-aceb-c22bbf08e536" },
+      { "id": "1edc5d44-97d8-43d7-9d79-66298f690487", "account_code": "FW-P1-MR7IIMAZ", "trader_id": "f825ff08-4431-448c-aceb-c22bbf08e536" },
+      { "id": "2c7b7caf-5dfc-4aff-9997-476ce9ecbb1e", "account_code": "FW-P1-MR7NBHDE", "trader_id": "d4ae354b-3048-43c7-a6d6-1b44b93867f6" },
+      { "id": "3869438f-82ee-4a19-b032-0aa8eeab0e19", "account_code": "FW-P1-MR7KNVDS", "trader_id": "01e0c8e4-9985-43ac-965d-fccef487bcd4" },
+      { "id": "391e8ddd-6a2e-430c-880f-2fc93765ccf8", "account_code": "FW-P1-MR7IIHKQ", "trader_id": "01e0c8e4-9985-43ac-965d-fccef487bcd4" },
+      { "id": "59aeba29-f75f-4cf4-aa7d-5b9bad475dc2", "account_code": "FW-P1-MR7MZ5JE", "trader_id": "d4ae354b-3048-43c7-a6d6-1b44b93867f6" },
+      { "id": "8e6fab42-4627-4114-a04e-4c7d1ffc4a8d", "account_code": "FW-P1-MR7MZ0MD", "trader_id": "01e0c8e4-9985-43ac-965d-fccef487bcd4" },
+      { "id": "a8d527a1-ce57-410e-b217-0577dd10d8d4", "account_code": "RT-TEST-001", "trader_id": "a99a47f0-61e1-4503-be5d-b06119fd42d7" },
+      { "id": "b3512742-cee2-4d52-a36b-746d0b14df31", "account_code": "FW-P1-MR7MZ3PH", "trader_id": "f825ff08-4431-448c-aceb-c22bbf08e536" },
+      { "id": "c89c4a56-bc33-4046-b4b0-51fa4a1ffdb5", "account_code": "FW-P1-MR7NBFV3", "trader_id": "f825ff08-4431-448c-aceb-c22bbf08e536" },
+      { "id": "d6bf70e2-8f40-4b50-9cee-ea3577abad13", "account_code": "FW-P1-MR7KNY3P", "trader_id": "d4ae354b-3048-43c7-a6d6-1b44b93867f6" },
+      { "id": "db37c889-bf48-41a3-bca5-579fe0a83be0", "account_code": "FW-P1-MR7IIN7R", "trader_id": "d4ae354b-3048-43c7-a6d6-1b44b93867f6" },
+      { "id": "f5b502c8-f624-4f5c-8cc1-c25ed6a87fd9", "account_code": "FW-P1-MR7NBBLA", "trader_id": "01e0c8e4-9985-43ac-965d-fccef487bcd4" }
+    ]
+  },
+  "classification_counts": {
+    "CONFIRMED": 128,
+    "UNRESOLVED": 4,
+    "AMBIGUOUS": 0,
+    "ORPHANED": 0,
+    "UNKNOWN": 0
+  },
+  "migration_eligibility": "UNDETERMINED",
+  "phase_complete": false,
+  "remaining_blockers": [
+    "Approved read-only SQL/dashboard execution",
+    "Auth to public.users relationship",
+    "public.users to terminal_traders FK enforcement",
+    "Four unresolved trader identities",
+    "Staff Auth to staff_members relationship",
+    "PK/FK/unique/index metadata"
+  ]
+}

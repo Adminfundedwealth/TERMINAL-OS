@@ -85,13 +85,13 @@ export function PerformanceListClient() {
             key: "opening_balance",
             header: "Opening",
             className: "text-right",
-            render: (r) => <span className="tabular-nums">{formatCurrency(Number(r.opening_balance))}</span>,
+            render: (r) => <span className="tabular-nums">{formatCurrency(r.opening_balance == null ? null : Number(r.opening_balance))}</span>,
           },
           {
             key: "closing_balance",
             header: "Closing",
             className: "text-right",
-            render: (r) => <span className="tabular-nums">{formatCurrency(Number(r.closing_balance))}</span>,
+            render: (r) => <span className="tabular-nums">{formatCurrency(r.closing_balance == null ? null : Number(r.closing_balance))}</span>,
           },
           {
             key: "daily_pnl",
@@ -134,7 +134,7 @@ export function PerformanceListClient() {
             key: "fees",
             header: "Fees",
             className: "text-right",
-            render: (r) => <span className="tabular-nums text-muted-foreground">{formatCurrency(Number(r.fees))}</span>,
+            render: (r) => <span className="tabular-nums text-muted-foreground">{r.fees == null ? "—" : formatCurrency(Number(r.fees))}</span>,
           },
         ]}
         data={rows}

@@ -14,7 +14,8 @@
  *   - executions uses qty/price (not quantity/fill_price), no fees/execution_status
  *   - positions uses is_open boolean (not status string), qty/avg_price/current_price
  *   - daily_performance equivalent is `account_metrics`
- *   - staff auth is in staff_members (not employees)
+ *   - staff records are in staff_members (not employees); the staff_members
+ *     to Supabase Auth relationship is not verified by the live contract
  */
 
 export type Json =
@@ -28,6 +29,27 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      // -------------------------------------------------------
+      // TERMINAL TRADERS
+      // -------------------------------------------------------
+      terminal_traders: {
+        Row: {
+          id: string;
+          external_id: string;
+          email: string;
+          display_name: string;
+          avatar_url: string | null;
+          plan: string | null;
+          status: string | null;
+          preferences: Json;
+          last_login_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+      };
+
       // -------------------------------------------------------
       // TRADING ACCOUNTS
       // -------------------------------------------------------
@@ -337,7 +359,7 @@ export interface Database {
       };
 
       // -------------------------------------------------------
-      // STAFF MEMBERS  (admin auth — custom password+TOTP, not Supabase Auth)
+      // STAFF MEMBERS (live staff records; Auth relationship unresolved)
       // -------------------------------------------------------
       staff_members: {
         Row: {
@@ -378,46 +400,6 @@ export interface Database {
           locked_until?: string | null;
           force_password_change?: boolean;
           updated_at?: string;
-        };
-      };
-
-      // -------------------------------------------------------
-      // STAFF SESSIONS
-      // -------------------------------------------------------
-      staff_sessions: {
-        Row: {
-          id: string;
-          staff_id: string;
-          token_hash: string;
-          device_fingerprint: string;
-          browser: string;
-          os: string;
-          ip_address: string;
-          geolocation: Json | null;
-          is_new_device: boolean;
-          created_at: string;
-          last_activity: string;
-          expires_at: string;
-          invalidated_at: string | null;
-        };
-        Insert: {
-          id?: string;
-          staff_id: string;
-          token_hash: string;
-          device_fingerprint?: string;
-          browser?: string;
-          os?: string;
-          ip_address?: string;
-          geolocation?: Json | null;
-          is_new_device?: boolean;
-          created_at?: string;
-          last_activity?: string;
-          expires_at: string;
-          invalidated_at?: string | null;
-        };
-        Update: {
-          last_activity?: string;
-          invalidated_at?: string | null;
         };
       };
 

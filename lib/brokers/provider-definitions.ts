@@ -13,10 +13,10 @@ export const BROKER_PROVIDERS: BrokerProviderDef[] = [
     id: "dhan",
     name: "Dhan",
     description:
-      "Primary broker - provides Option Chain, Greeks, Live LTP, OI Data and Expiry List. Only provider with a live backend runtime integration.",
+      "Read-only market data integration for instrument search, live quotes and historical candles.",
     color: "bg-cyan-500",
     textColor: "text-cyan-400",
-    capabilities: ["Option Chain", "Live LTP", "Greeks", "OI Data", "Expiry List"],
+    capabilities: ["Instrument Search", "Quotes / LTP", "Historical Candles"],
     fields: [
       {
         key: "client_id",
@@ -46,10 +46,10 @@ export const BROKER_PROVIDERS: BrokerProviderDef[] = [
     id: "zerodha",
     name: "Zerodha (Kite)",
     description:
-      "India's largest broker. Access live data via Kite Connect API with WebSocket streaming. Configuration only - no runtime backend integration yet.",
+      "Read-only market data integration for instrument search, live quotes and historical candles.",
     color: "bg-red-500",
     textColor: "text-red-400",
-    capabilities: ["Option Chain", "Live Quotes", "WebSocket Streaming", "Historical Data"],
+    capabilities: ["Instrument Search", "Quotes / LTP", "Historical Candles"],
     fields: [
       {
         key: "api_key",
@@ -77,7 +77,7 @@ export const BROKER_PROVIDERS: BrokerProviderDef[] = [
       },
     ],
     docsUrl: "https://kite.trade/docs/connect/v3/",
-    runtimeIntegrated: false,
+    runtimeIntegrated: true,
   },
 
   // 3. ANGEL ONE (SMARTAPI)

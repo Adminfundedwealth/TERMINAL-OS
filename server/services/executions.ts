@@ -14,7 +14,7 @@
  * Live DB extra columns (preserved in response):
  *   token, segment, exchange_timestamp, position_id, broker_trade_id
  */
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createCanonicalAdminClient } from "@/lib/supabase/canonical-admin";
 import type { Execution } from "@/types";
 
 export interface ExecutionFilters {
@@ -32,7 +32,7 @@ export interface ExecutionFilters {
 export async function getExecutions(
   filters: ExecutionFilters = {}
 ): Promise<{ data: Execution[]; total: number }> {
-  const db = createServerSupabaseClient();
+  const db = createCanonicalAdminClient();
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(100, filters.page_size ?? 25);
   const offset = (page - 1) * pageSize;
@@ -40,7 +40,7 @@ export async function getExecutions(
   let query = db.from("executions").select("*", { count: "exact" });
 
   if (filters.trading_account_id)
-    query = query.eq("trading_account_id", filters.trading_account_id);
+    query = query.eq("account_id", filters.trading_account_id);
   if (filters.order_id)
     query = query.eq("order_id", filters.order_id);
   if (filters.symbol)
@@ -60,15 +60,27 @@ export async function getExecutions(
     .range(offset, offset + pageSize - 1);
 
   if (error) throw error;
-  return { data: (data ?? []) as Execution[], total: count ?? 0 };
+  return { data: ((data ?? []) as unknown as Record<string, unknown>[]).map(mapCanonicalExecution), total: count ?? 0 };
+}
+
+function mapCanonicalExecution(row: Record<string, unknown>): Execution {
+  return {
+    id: String(row.id), trading_account_id: String(row.account_id), order_id: String(row.order_id),
+    position_id: typeof row.position_id === "string" ? row.position_id : null,
+    broker_trade_id: typeof row.external_execution_id === "string" ? row.external_execution_id : null,
+    symbol: String(row.symbol), token: "", segment: String(row.segment ?? row.exchange ?? ""),
+    side: String(row.side).toUpperCase() as Execution["side"], qty: Number(row.quantity),
+    price: Number(row.execution_price), exchange_timestamp: typeof row.executed_at === "string" ? row.executed_at : null,
+    executed_at: String(row.executed_at),
+  };
 }
 
 export async function getExecutionById(id: string): Promise<Execution | null> {
-  const db = createServerSupabaseClient();
+  const db = createCanonicalAdminClient();
   const { data } = await db
     .from("executions")
     .select("*")
     .eq("id", id)
     .single();
-  return data as Execution | null;
+  return data ? mapCanonicalExecution(data as unknown as Record<string, unknown>) : null;
 }

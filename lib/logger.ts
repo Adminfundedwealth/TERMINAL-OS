@@ -65,26 +65,13 @@ export async function writeActivityLog(params: {
   ip_address?: string;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
-  try {
-    // Lazy import to avoid circular deps and keep this file lightweight
-    const { createServerSupabaseClient } = await import(
-      "@/lib/supabase/server"
-    );
-    const client = createServerSupabaseClient();
-    await client.from("terminal_activity").insert({
-      employee_id: params.employee_id ?? null,
-      action: params.action,
-      module: params.module,
-      resource: params.resource ?? null,
-      resource_id: params.resource_id ?? null,
-      result: params.result,
-      ip_address: params.ip_address ?? null,
-      metadata: params.metadata ?? null,
-    });
-  } catch (err) {
-    // Activity logging must never crash the main request
-    serverLog("warn", "logger", "activity_write_failed", {
-      message: err instanceof Error ? err.message : String(err),
-    });
-  }
+  // terminal_activity is absent from the canonical schema; retain a structured server audit trail.
+  serverLog("info", params.module, params.action, {
+    employee_id: params.employee_id ?? undefined,
+    result: params.result,
+    resource: params.resource,
+    resource_id: params.resource_id,
+    ip_address: params.ip_address,
+    metadata: params.metadata,
+  });
 }

@@ -4,7 +4,7 @@
  * Call validateServerEnv() at startup (e.g., in next.config.ts or a
  * server-only initializer) to catch missing variables early.
  *
- * NEVER import TERMINAL_SUPABASE_SECRET_KEY in client code.
+ * NEVER import CANONICAL_TERMINAL_SUPABASE_SECRET_KEY in client code.
  * This file is server-side only.
  */
 
@@ -16,15 +16,15 @@ export interface EnvValidationResult {
 
 /** Required on the server — never exposed to browser */
 const REQUIRED_SERVER_VARS = [
-  "TERMINAL_SUPABASE_URL",
-  "TERMINAL_SUPABASE_SECRET_KEY",
+  "CANONICAL_TERMINAL_SUPABASE_URL",
+  "CANONICAL_TERMINAL_SUPABASE_SECRET_KEY",
   "SESSION_SECRET",
 ] as const;
 
 /** Required on the client (NEXT_PUBLIC_ prefix, safe to expose) */
 const REQUIRED_PUBLIC_VARS = [
-  "NEXT_PUBLIC_TERMINAL_SUPABASE_URL",
-  "NEXT_PUBLIC_TERMINAL_SUPABASE_PUBLISHABLE_KEY",
+  "NEXT_PUBLIC_CANONICAL_SUPABASE_URL",
+  "NEXT_PUBLIC_CANONICAL_SUPABASE_PUBLISHABLE_KEY",
 ] as const;
 
 /** Variables that must NEVER be present in this project */
@@ -65,10 +65,10 @@ export function validateServerEnv(): EnvValidationResult {
   }
 
   // Warn if anon key looks like a service role key (starts with eyJ and is very long)
-  const anonKey = process.env.NEXT_PUBLIC_TERMINAL_SUPABASE_PUBLISHABLE_KEY ?? "";
+  const anonKey = process.env.NEXT_PUBLIC_CANONICAL_SUPABASE_PUBLISHABLE_KEY ?? "";
   if (anonKey && anonKey.length > 500) {
     warnings.push(
-      "NEXT_PUBLIC_TERMINAL_SUPABASE_PUBLISHABLE_KEY appears to be a service role key " +
+      "NEXT_PUBLIC_CANONICAL_SUPABASE_PUBLISHABLE_KEY appears to be a service role key " +
         "(too long). Never expose the service role key to the browser."
     );
   }

@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TopNav } from "@/components/layout/top-nav";
 
+export const dynamic = "force-dynamic";
+
 export default async function TerminalLayout({
   children,
 }: {

@@ -22,7 +22,7 @@ export const GET = withAuth(PERMISSIONS.SYSTEM_HEALTH_VIEW, async () => {
   try {
     const db = createServerSupabaseClient();
     const { error } = await db
-      .from("terminal_settings")
+      .from("trading_accounts")
       .select("id", { count: "exact", head: true });
     checks.push({
       name: "database",
@@ -43,38 +43,15 @@ export const GET = withAuth(PERMISSIONS.SYSTEM_HEALTH_VIEW, async () => {
     });
   }
 
-  // Provider health from DB
-  try {
-    const db = createServerSupabaseClient();
-    const { data: healthData } = await db
-      .from("provider_health")
-      .select("provider_id, status, last_success_at, last_error_message, checked_at")
-      .order("checked_at", { ascending: false })
-      .limit(20);
-
-    const providers = (healthData ?? []) as Array<{
-      provider_id: string;
-      status: string;
-      last_success_at: string | null;
-      last_error_message: string | null;
-      checked_at: string;
-    }>;
-    // Aggregate provider health
-    const hasError = providers.some((p) => p.status === "ERROR");
-    const allUnknown = providers.length === 0 || providers.every((p) => p.status === "UNKNOWN");
-    const anyConnected = providers.some((p) => p.status === "CONNECTED");
-
-    checks.push({
-      name: "market_data_providers",
-      status: allUnknown ? "UNKNOWN" : hasError ? "WARNING" : anyConnected ? "HEALTHY" : "UNKNOWN",
-      response_time_ms: null,
-      last_success_at: providers.find((p) => p.last_success_at)?.last_success_at ?? null,
-      last_error: null,
-      checked_at: now,
-    });
-  } catch {
-    checks.push({ name: "market_data_providers", status: "UNKNOWN", response_time_ms: null, last_success_at: null, last_error: null, checked_at: now });
-  }
+  // Provider health is unavailable because provider_health is not a live table.
+  checks.push({
+    name: "market_data_providers",
+    status: "UNKNOWN",
+    response_time_ms: null,
+    last_success_at: null,
+    last_error: "Provider health storage is unavailable",
+    checked_at: now,
+  });
 
   // Terminal API (self-check)
   checks.push({

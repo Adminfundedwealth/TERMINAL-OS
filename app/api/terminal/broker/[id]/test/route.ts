@@ -1,13 +1,13 @@
 /**
  * POST /api/terminal/broker/[id]/test
  * Tests the connection for a saved broker credential.
- * Only Dhan has a real implementation — all others report NOT IMPLEMENTED.
+ * Dhan and Kite authenticate through their read-only provider adapters.
  */
 import { NextResponse } from "next/server";
 import { withAuth, handleApiError } from "@/lib/auth/api-handler";
 import { PERMISSIONS } from "@/lib/rbac/permissions";
 import {
-  testDhanConnection,
+  testBrokerConnection,
   getBrokerCredentialById,
 } from "@/server/services/broker-credentials";
 import { writeActivityLog } from "@/lib/logger";
@@ -30,17 +30,7 @@ export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }
       );
     }
 
-    let result: { success: boolean; message: string };
-
-    if (record.broker_id === "dhan") {
-      result = await testDhanConnection(id);
-    } else {
-      // Non-Dhan providers: configuration only, no runtime integration
-      result = {
-        success: false,
-        message: `Runtime integration not implemented for ${record.broker_id}. Credentials are stored securely but connection testing is not available.`,
-      };
-    }
+    const result = await testBrokerConnection(id);
 
     // Audit log — no credential values
     await writeActivityLog({
@@ -53,7 +43,7 @@ export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }
       metadata: {
         broker_id: record.broker_id,
         test_result: result.message,
-        implemented: record.broker_id === "dhan",
+        implemented: result.implemented,
       },
     });
 
@@ -63,7 +53,7 @@ export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }
         broker_id: record.broker_id,
         message: result.message,
         tested_at: new Date().toISOString(),
-        implemented: record.broker_id === "dhan",
+        implemented: result.implemented,
       },
     });
   } catch (err) {

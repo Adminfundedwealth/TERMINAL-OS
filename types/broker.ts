@@ -41,7 +41,7 @@ export interface BrokerProviderDef {
   capabilities: string[];
   fields: CredentialField[];
   docsUrl: string;
-  /** Only Dhan has a real backend runtime integration */
+  /** Dhan and Kite have read-only market-data runtime integrations. */
   runtimeIntegrated: boolean;
   /** Dhan upstream REST base */
   apiBase?: string;
@@ -50,11 +50,12 @@ export interface BrokerProviderDef {
 }
 
 // -------------------------------------------------------
-// DATABASE ROW  (what comes back from broker_credentials)
+// DATABASE ROW (encrypted values are never included)
 // -------------------------------------------------------
 
 export interface BrokerCredentialRow {
   id: string;
+  trading_account_id: string | null;
   broker_id: BrokerId;
   label: string;
   /** Masked credential values — NEVER the raw secrets */
@@ -75,6 +76,7 @@ export interface BrokerCredentialRow {
 // -------------------------------------------------------
 
 export interface SaveBrokerCredentialsPayload {
+  trading_account_id?: string;
   broker_id: BrokerId;
   label?: string;
   credentials: Record<string, string>;  // raw — sent over HTTPS, never stored in browser

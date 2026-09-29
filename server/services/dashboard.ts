@@ -1,4 +1,4 @@
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createCanonicalAdminClient } from "@/lib/supabase/canonical-admin";
 import type { DashboardSummary } from "@/types";
 
 const EMPTY_SUMMARY: DashboardSummary = {
@@ -20,7 +20,7 @@ const EMPTY_SUMMARY: DashboardSummary = {
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   try {
-    const db = createServerSupabaseClient();
+    const db = createCanonicalAdminClient();
     const today = new Date().toISOString().split("T")[0];
 
     const [
@@ -36,14 +36,12 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
       db.from("trading_accounts").select("id", { count: "exact", head: true }),
       // Live DB status is lowercase "active"
       db.from("trading_accounts").select("id", { count: "exact", head: true }).eq("status", "active"),
-      // trading_orders — NOT the payment `orders` table
-      db.from("trading_orders").select("id", { count: "exact", head: true }).gte("placed_at", `${today}T00:00:00.000Z`),
+      db.from("orders").select("id", { count: "exact", head: true }).gte("submitted_at", `${today}T00:00:00.000Z`),
       db.from("executions").select("id", { count: "exact", head: true }).gte("executed_at", `${today}T00:00:00.000Z`),
-      // Live DB uses boolean is_open, not status string
-      db.from("positions").select("id", { count: "exact", head: true }).eq("is_open", true),
+      db.from("positions").select("id", { count: "exact", head: true }).eq("position_status", "open"),
       // Exposure = sum(qty * avg_price) for open positions
-      db.from("positions").select("qty, avg_price").eq("is_open", true),
-      db.from("risk_events").select("id", { count: "exact", head: true }).gte("created_at", `${today}T00:00:00.000Z`),
+      db.from("positions").select("quantity, average_price").eq("position_status", "open"),
+      db.from("risk_events").select("id", { count: "exact", head: true }).gte("occurred_at", `${today}T00:00:00.000Z`),
       // DB health probe — use a table that always exists
       db.from("trading_accounts").select("id", { count: "exact", head: true }),
     ]);
@@ -57,8 +55,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 
     let totalExposure = 0;
     if (exposureResult.status === "fulfilled" && exposureResult.value?.data) {
-      const posRows = exposureResult.value.data as Array<{ qty: number; avg_price: number }>;
-      totalExposure = posRows.reduce((sum, pos) => sum + pos.qty * (pos.avg_price ?? 0), 0);
+      const posRows = exposureResult.value.data as Array<{ quantity: number; average_price: number }>;
+      totalExposure = posRows.reduce((sum, pos) => sum + pos.quantity * (pos.average_price ?? 0), 0);
     }
 
     const dbHealthy = dbHealthResult.status === "fulfilled" && !dbHealthResult.value?.error;
@@ -86,14 +84,14 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 
 export async function getRecentAccounts(limit = 5) {
   try {
-    const db = createServerSupabaseClient();
+    const db = createCanonicalAdminClient();
     const { data } = await db
       .from("trading_accounts")
       // Safe columns — broker_credentials_encrypted excluded
-      .select("id, account_code, trader_id, status, broker_provider, balance, created_at")
+      .select("id, account_code, owner_user_id, status, broker_provider, account_type, currency, current_balance, created_at")
       .order("created_at", { ascending: false })
       .limit(limit);
-    return data ?? [];
+    return (data ?? []).map((row) => ({ ...row, trader_id: row.owner_user_id, balance: row.current_balance }));
   } catch {
     return [];
   }
@@ -101,14 +99,13 @@ export async function getRecentAccounts(limit = 5) {
 
 export async function getRecentOrders(limit = 10) {
   try {
-    const db = createServerSupabaseClient();
-    // trading_orders — NOT the payment `orders` table
+    const db = createCanonicalAdminClient();
     const { data } = await db
-      .from("trading_orders")
-      .select("id, trading_account_id, symbol, segment, side, order_type, qty, status, placed_at")
-      .order("placed_at", { ascending: false })
+      .from("orders")
+      .select("id, account_id, symbol, segment, exchange, side, order_type, quantity, status, submitted_at")
+      .order("submitted_at", { ascending: false })
       .limit(limit);
-    return data ?? [];
+    return (data ?? []).map((row) => ({ ...row, trading_account_id: row.account_id, qty: row.quantity, placed_at: row.submitted_at }));
   } catch {
     return [];
   }
@@ -116,14 +113,13 @@ export async function getRecentOrders(limit = 10) {
 
 export async function getRecentRiskEvents(limit = 5) {
   try {
-    const db = createServerSupabaseClient();
+    const db = createCanonicalAdminClient();
     const { data } = await db
       .from("risk_events")
-      // Live DB: rule_type (not metric), threshold_value (not threshold), actual_value
-      .select("id, trading_account_id, event_type, severity, rule_type, actual_value, threshold_value, created_at")
-      .order("created_at", { ascending: false })
+      .select("id, account_id, event_type, severity, metric_name, metric_value, limit_value, occurred_at")
+      .order("occurred_at", { ascending: false })
       .limit(limit);
-    return data ?? [];
+    return (data ?? []).map((row) => ({ ...row, trading_account_id: row.account_id, metric: row.metric_name ?? "", actual_value: row.metric_value, threshold: row.limit_value, created_at: row.occurred_at }));
   } catch {
     return [];
   }

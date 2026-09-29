@@ -20,10 +20,15 @@ import type { BrokerId } from "@/types/broker";
 const VALID_BROKER_IDS = BROKER_PROVIDERS.map((p) => p.id) as [BrokerId, ...BrokerId[]];
 
 const SaveSchema = z.object({
+  trading_account_id: z.string().uuid().optional(),
   broker_id: z.enum(VALID_BROKER_IDS),
   label: z.string().max(64).optional(),
   credentials: z.record(z.string(), z.string()),
   environment: z.enum(["production", "paper", "sandbox"]).optional(),
+}).superRefine((data, context) => {
+  if ((data.broker_id === "dhan" || data.broker_id === "zerodha") && !data.trading_account_id) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["trading_account_id"], message: "An account is required for market-data credentials." });
+  }
 });
 
 export const GET = withAuth(PERMISSIONS.BROKER_VIEW, async ({ employee }) => {

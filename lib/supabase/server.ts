@@ -1,9 +1,15 @@
 import "server-only";
 import { createClient } from "@supabase/supabase-js";
+import { assertCanonicalSupabaseUrl } from "@/lib/supabase/project";
 
 export function createServerSupabaseClient() {
-  const url = process.env.TERMINAL_SUPABASE_URL ?? process.env.NEXT_PUBLIC_TERMINAL_SUPABASE_URL;
-  const secret = process.env.TERMINAL_SUPABASE_SECRET_KEY;
+  const url = process.env.CANONICAL_TERMINAL_SUPABASE_URL;
+  const secret = process.env.CANONICAL_TERMINAL_SUPABASE_SECRET_KEY;
+
+  if (!url || !secret) {
+    throw new Error("Canonical Terminal OS Supabase server credentials are not configured");
+  }
+  assertCanonicalSupabaseUrl(url);
 
   // In dev mode with placeholder values, return a dummy client that won't crash
   if (!url || url.includes("placeholder") || !secret || secret.includes("placeholder")) {

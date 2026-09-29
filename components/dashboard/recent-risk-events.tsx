@@ -9,8 +9,8 @@ interface RecentRiskEvent {
   event_type: string;
   severity: string;
   metric: string;
-  actual_value: number;
-  threshold: number;
+  actual_value: number | null;
+  threshold: number | null;
   created_at: string;
 }
 
@@ -45,7 +45,7 @@ export function RecentRiskEvents({ events }: { events: RecentRiskEvent[] }) {
           </div>
           <div className="mt-2 flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">
-              {event.metric}: {event.actual_value} / {event.threshold}
+              {event.metric}: {event.actual_value ?? "—"} / {event.threshold ?? "—"}
             </span>
             <span className="text-[10px] text-muted-foreground">
               {formatRelativeTime(event.created_at)}

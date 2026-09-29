@@ -23,9 +23,18 @@ interface EnrichedRow extends BrokerCredentialRow {
   runtime_integrated: boolean;
 }
 
+interface AccountOption {
+  id: string;
+  account_code: string;
+  status: string;
+  broker_provider: string;
+}
+
 export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
   const [tab, setTab] = useState<TabId>("available");
   const [savedRows, setSavedRows] = useState<EnrichedRow[]>([]);
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState("");
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{
     type: "success" | "error";
@@ -55,17 +64,46 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
     }
   }, []);
 
-  useEffect(() => { fetchSaved(); }, [fetchSaved]);
+  const fetchAccounts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/terminal/accounts?status=active&page_size=100");
+      if (!res.ok) { setAccounts([]); return; }
+      const { data } = await res.json();
+      const rows = (data ?? []) as AccountOption[];
+      setAccounts(rows);
+      setSelectedAccountId((current) => rows.some((row) => row.id === current) ? current : rows[0]?.id ?? "");
+    } catch {
+      setAccounts([]);
+      setSelectedAccountId("");
+    }
+  }, []);
 
-  const savedByBrokerId = new Map(savedRows.map((r) => [r.broker_id, r]));
+  useEffect(() => { void fetchSaved(); void fetchAccounts(); }, [fetchAccounts, fetchSaved]);
+
+  const isAccountScopedProvider = (providerId: string) => providerId === "dhan" || providerId === "zerodha";
+  const visibleRows = savedRows.filter((row) =>
+    !isAccountScopedProvider(row.broker_id) || row.trading_account_id === selectedAccountId
+  );
+  const savedByBrokerId = new Map(visibleRows.map((r) => [r.broker_id, r]));
   const connectedProviders = BROKER_PROVIDERS.filter((p) => savedByBrokerId.has(p.id));
   const availableProviders = BROKER_PROVIDERS.filter((p) => !savedByBrokerId.has(p.id));
+  const unassignedMarketCredentialCount = savedRows.filter((row) =>
+    isAccountScopedProvider(row.broker_id) && !row.trading_account_id
+  ).length;
 
   async function handleSave(provider: BrokerProviderDef, credentials: Record<string, string>, label: string) {
+    if (isAccountScopedProvider(provider.id) && !selectedAccountId) {
+      throw new Error("Select an active trading account before saving Dhan or Kite credentials.");
+    }
     const res = await fetch("/api/terminal/broker", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ broker_id: provider.id, label, credentials }),
+      body: JSON.stringify({
+        broker_id: provider.id,
+        label,
+        credentials,
+        ...(isAccountScopedProvider(provider.id) ? { trading_account_id: selectedAccountId } : {}),
+      }),
     });
     const j = await res.json();
     if (!res.ok) throw new Error(j?.error?.message ?? "Save failed.");
@@ -141,6 +179,28 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
 
       {/* Security Notice */}
       <BrokerSecurityNotice />
+
+      <label className="block max-w-lg space-y-1.5 text-sm">
+        <span className="font-medium text-foreground">Trading account for Dhan/Kite credentials</span>
+        <select
+          value={selectedAccountId}
+          onChange={(event) => setSelectedAccountId(event.target.value)}
+          className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
+        >
+          <option value="">Select an active account</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.account_code || account.id} · {account.broker_provider}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {unassignedMarketCredentialCount > 0 && (
+        <div role="status" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-200">
+          {unassignedMarketCredentialCount} legacy Dhan/Kite credential row(s) are unassigned and unavailable to customer market-data requests. Add credentials for a specific active account; legacy rows were not reassigned.
+        </div>
+      )}
 
       {/* Connection Status - individual service rows with Test button */}
       <DataSourcesPanel />

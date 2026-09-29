@@ -1,5 +1,51 @@
-import { createServerSupabaseClient } from "@/lib/supabase/server";
-import type { DailyPerformance } from "@/types";
+import { createCanonicalAdminClient } from "@/lib/supabase/canonical-admin";
+
+interface PerformanceRow {
+  id: string;
+  trading_account_id: string;
+  date: string;
+  opening_balance: number | null;
+  closing_balance: number | null;
+  daily_pnl: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  gross_profit: number;
+  gross_loss: number;
+  fees: number | null;
+}
+
+interface AccountMetricRow {
+  id: string;
+  account_id: string;
+  trading_date: string;
+  opening_balance: number | null;
+  closing_balance: number | null;
+  realized_pnl: number;
+  fees: number;
+  trade_count: number;
+  winning_trades: number;
+  losing_trades: number;
+  gross_profit: number;
+  gross_loss: number;
+}
+
+function toPerformanceRow(row: AccountMetricRow): PerformanceRow {
+  return {
+    id: row.id,
+    trading_account_id: row.account_id,
+    date: row.trading_date,
+    opening_balance: row.opening_balance,
+    closing_balance: row.closing_balance,
+    daily_pnl: row.realized_pnl - row.fees,
+    total_trades: row.trade_count,
+    winning_trades: row.winning_trades,
+    losing_trades: row.losing_trades,
+    gross_profit: row.gross_profit,
+    gross_loss: row.gross_loss,
+    fees: row.fees,
+  };
+}
 
 export interface PerformanceFilters {
   trading_account_id?: string;
@@ -11,8 +57,8 @@ export interface PerformanceFilters {
 
 export async function getDailyPerformance(
   filters: PerformanceFilters = {}
-): Promise<{ data: DailyPerformance[]; total: number }> {
-  const db = createServerSupabaseClient();
+): Promise<{ data: PerformanceRow[]; total: number }> {
+  const db = createCanonicalAdminClient();
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(100, filters.page_size ?? 31);
   const offset = (page - 1) * pageSize;
@@ -20,28 +66,31 @@ export async function getDailyPerformance(
   let query = db.from("daily_performance").select("*", { count: "exact" });
 
   if (filters.trading_account_id)
-    query = query.eq("trading_account_id", filters.trading_account_id);
-  if (filters.date_from) query = query.gte("date", filters.date_from);
-  if (filters.date_to) query = query.lte("date", filters.date_to);
+    query = query.eq("account_id", filters.trading_account_id);
+  if (filters.date_from) query = query.gte("trading_date", filters.date_from);
+  if (filters.date_to) query = query.lte("trading_date", filters.date_to);
 
   const { data, count, error } = await query
-    .order("date", { ascending: false })
+    .order("trading_date", { ascending: false })
     .range(offset, offset + pageSize - 1);
 
   if (error) throw error;
-  return { data: (data ?? []) as DailyPerformance[], total: count ?? 0 };
+  return {
+    data: ((data ?? []) as unknown as AccountMetricRow[]).map(toPerformanceRow),
+    total: count ?? 0,
+  };
 }
 
 export async function getPerformanceSummary(accountId: string) {
-  const db = createServerSupabaseClient();
+  const db = createCanonicalAdminClient();
   const { data } = await db
     .from("daily_performance")
     .select("*")
-    .eq("trading_account_id", accountId)
-    .order("date", { ascending: false })
+    .eq("account_id", accountId)
+    .order("trading_date", { ascending: false })
     .limit(365);
 
-  const rows = (data ?? []) as DailyPerformance[];
+  const rows = ((data ?? []) as unknown as AccountMetricRow[]).map(toPerformanceRow);
 
   const totalPnl = rows.reduce((s, r) => s + r.daily_pnl, 0);
   const tradingDays = rows.length;

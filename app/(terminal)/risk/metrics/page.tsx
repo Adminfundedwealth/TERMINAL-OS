@@ -9,7 +9,7 @@ export default function AccountMetricsPage() {
     <div>
       <PageHeader
         title="Account Metrics"
-        description="Latest risk metric snapshots per account from the risk service"
+        description="Daily account metrics from the canonical account_metrics table"
       />
       <RiskMetricsTable />
     </div>

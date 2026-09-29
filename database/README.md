@@ -12,7 +12,8 @@
 2. Navigate to **SQL Editor**
 3. Run `schema.sql` in full
 4. Verify all 17 tables are created
-5. Copy `.env.example` → `.env.local` and fill in your Terminal Supabase #2 credentials
+5. Run `broker_credentials_migration.sql` and `broker_encryption_rpc.sql` from this directory
+6. Copy `.env.example` → `.env.local` and fill in your Terminal Supabase #2 credentials
 
 ## Tables Created
 
@@ -35,10 +36,12 @@
 | `terminal_activity` | Append-only activity log |
 | `provider_config` | Provider metadata (no credentials stored) |
 | `provider_health` | Provider operational health |
+| `broker_credentials` | Encrypted broker credential records (separate migration) |
 
 ## Security
 
 - Row Level Security is **enabled on all tables**
 - The **service role key** (server-side only) bypasses RLS for Terminal OS backend operations
 - The **anon key** has no access to any table by default
-- Provider credentials are **never stored in the database** — use server env vars only
+- Broker credentials are encrypted through the existing pgcrypto RPCs before storage; `BROKER_ENCRYPTION_KEY` is server-only
+- Raw broker credentials and decrypted values must never appear in API responses or logs

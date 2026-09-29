@@ -1,20 +1,11 @@
-import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDateTime } from "@/lib/utils";
 import { ShieldAlert } from "lucide-react";
-import type { RiskEvent } from "@/types";
+import { getRiskEvents } from "@/server/services/risk";
 
 export async function AccountRiskTab({ accountId }: { accountId: string }) {
-  const db = createServerSupabaseClient();
-  const { data } = await db
-    .from("risk_events")
-    .select("*")
-    .eq("trading_account_id", accountId)
-    .order("created_at", { ascending: false })
-    .limit(10);
-
-  const events = (data ?? []) as RiskEvent[];
+  const { data: events } = await getRiskEvents({ trading_account_id: accountId, page: 1, page_size: 10 });
 
   if (events.length === 0) {
     return (
@@ -37,10 +28,10 @@ export async function AccountRiskTab({ accountId }: { accountId: string }) {
             <tr key={e.id} className="border-b border-border last:border-0 hover:bg-muted/30">
               <td className="px-3 py-2 font-medium">{e.event_type.replace(/_/g, " ")}</td>
               <td className="px-3 py-2"><StatusBadge status={e.severity} /></td>
-              <td className="px-3 py-2 text-muted-foreground">{e.metric}</td>
+              <td className="px-3 py-2 text-muted-foreground">{e.rule_type}</td>
               <td className="px-3 py-2 tabular-nums">{e.actual_value}</td>
-              <td className="px-3 py-2 tabular-nums">{e.threshold}</td>
-              <td className="px-3 py-2 text-muted-foreground">{e.action_taken ?? "—"}</td>
+              <td className="px-3 py-2 tabular-nums">{e.threshold_value ?? "—"}</td>
+              <td className="px-3 py-2 text-muted-foreground">{e.metadata.action_taken ? String(e.metadata.action_taken) : "—"}</td>
               <td className="px-3 py-2 text-muted-foreground">{formatDateTime(e.created_at)}</td>
             </tr>
           ))}

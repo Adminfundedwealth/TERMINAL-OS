@@ -3,41 +3,31 @@
  *
  * Canonical table: trading_accounts
  *
- * Key field mappings vs old Terminal OS schema:
- *   owner_user_id   → trader_id        (FK → terminal_traders.id)
- *   current_balance → balance
- *   status values   → lowercase ("active", "suspended", etc.)
- *
- * Columns NOT on trading_accounts (live schema):
- *   account_type, challenge_type, equity, currency,
- *   daily_loss_limit, max_drawdown, profit_target,
- *   starting_balance, expires_at, last_activity_at
- *   → These live on challenge_accounts and risk_rules tables.
- *
  * broker_credentials_encrypted is NEVER selected or returned.
  */
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createCanonicalAdminClient } from "@/lib/supabase/canonical-admin";
 import type { TradingAccount } from "@/types";
 
 // Columns safe to select — explicitly excludes broker_credentials_encrypted
 const SAFE_COLUMNS = [
   "id",
-  "trader_id",
-  "challenge_id",
+  "owner_user_id",
   "account_code",
   "broker_provider",
-  "broker_client_id",
-  "balance",
+  "starting_balance",
+  "current_balance",
+  "equity",
   "available_margin",
   "used_margin",
+  "risk_state",
+  "product_id",
+  "phase_id",
+  "rule_version_id",
   "status",
-  "locked_reason",
-  "locked_at",
-  "unlocked_at",
+  "is_active",
+  "expires_at",
   "created_at",
   "updated_at",
-  "daily_profit_cap_until",
-  "first_payout_approved_at",
 ].join(", ");
 
 export interface AccountFilters {
@@ -50,11 +40,34 @@ export interface AccountFilters {
   sort_order?: "asc" | "desc";
 }
 
+function mapAccount(row: Record<string, unknown>): TradingAccount {
+  return {
+    id: String(row.id),
+    trader_id: String(row.owner_user_id),
+    challenge_id: typeof row.phase_id === "string" ? row.phase_id : null,
+    account_code: String(row.account_code ?? ""),
+    broker_provider: String(row.broker_provider ?? ""),
+    broker_client_id: "",
+    broker_credentials_encrypted: null,
+    balance: Number(row.current_balance ?? 0),
+    available_margin: Number(row.available_margin ?? 0),
+    used_margin: Number(row.used_margin ?? 0),
+    status: String(row.status) as TradingAccount["status"],
+    locked_reason: null,
+    locked_at: null,
+    unlocked_at: null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+    daily_profit_cap_until: null,
+    first_payout_approved_at: null,
+  };
+}
+
 export async function getAccounts(filters: AccountFilters = {}): Promise<{
   data: TradingAccount[];
   total: number;
 }> {
-  const db = createServerSupabaseClient();
+  const db = createCanonicalAdminClient();
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, filters.page_size ?? 25));
   const offset = (page - 1) * pageSize;
@@ -66,11 +79,11 @@ export async function getAccounts(filters: AccountFilters = {}): Promise<{
     .select(SAFE_COLUMNS, { count: "exact" });
 
   if (filters.status) query = query.eq("status", filters.status);
-  if (filters.trader_id) query = query.eq("trader_id", filters.trader_id);
+  if (filters.trader_id) query = query.eq("owner_user_id", filters.trader_id);
   if (filters.search) {
     // Search by account_code or trader_id
     query = query.or(
-      `account_code.ilike.%${filters.search}%,trader_id.ilike.%${filters.search}%`
+      `account_code.ilike.%${filters.search}%,owner_user_id.ilike.%${filters.search}%`
     );
   }
 
@@ -81,13 +94,13 @@ export async function getAccounts(filters: AccountFilters = {}): Promise<{
   if (error) throw error;
 
   return {
-    data: (data ?? []) as TradingAccount[],
+    data: ((data ?? []) as unknown as Record<string, unknown>[]).map(mapAccount),
     total: count ?? 0,
   };
 }
 
 export async function getAccountById(id: string): Promise<TradingAccount | null> {
-  const db = createServerSupabaseClient();
+  const db = createCanonicalAdminClient();
   const { data, error } = await db
     .from("trading_accounts")
     .select(SAFE_COLUMNS)
@@ -95,45 +108,54 @@ export async function getAccountById(id: string): Promise<TradingAccount | null>
     .single();
 
   if (error) return null;
-  return data as TradingAccount;
+  return data ? mapAccount(data as unknown as Record<string, unknown>) : null;
 }
 
 export async function getAccountSummaryStats(accountId: string) {
-  const db = createServerSupabaseClient();
+  const db = createCanonicalAdminClient();
   const today = new Date().toISOString().split("T")[0];
 
-  const [ordersToday, openPositions, closedPositions, latestMetrics] =
+  const [ordersToday, openPositions, closedPositions, latestMetrics, latestSnapshot, accountData] =
     await Promise.allSettled([
-      // Trading orders placed today (uses trading_orders, NOT the payment `orders` table)
+      // Trading orders placed today in the canonical orders table.
       db
-        .from("trading_orders")
+        .from("orders")
         .select("id", { count: "exact", head: true })
-        .eq("trading_account_id", accountId)
-        .gte("placed_at", `${today}T00:00:00.000Z`),
+        .eq("account_id", accountId)
+        .gte("submitted_at", `${today}T00:00:00.000Z`),
 
       // Currently open positions
       db
         .from("positions")
-        .select("id, symbol, qty, avg_price, current_price, unrealized_pnl, side, segment")
-        .eq("trading_account_id", accountId)
-        .eq("is_open", true),
+        .select("id, symbol, quantity, average_price, last_price, unrealized_pnl, side, exchange")
+        .eq("account_id", accountId)
+        .eq("position_status", "open"),
 
       // Closed positions count
       db
         .from("positions")
         .select("id", { count: "exact", head: true })
-        .eq("trading_account_id", accountId)
-        .eq("is_open", false),
+        .eq("account_id", accountId)
+        .eq("position_status", "closed"),
 
       // Latest daily metrics row for this account
       db
-        .from("account_metrics")
-        .select("realized_pnl, unrealized_pnl, total_trades, winning_trades, losing_trades, daily_loss, starting_balance, ending_balance, peak_balance")
-        .eq("trading_account_id", accountId)
-        .order("date", { ascending: false })
+        .from("daily_performance")
+        .select("realized_pnl, trade_count, winning_trades, losing_trades, fees, opening_balance, closing_balance")
+        .eq("account_id", accountId)
+        .order("trading_date", { ascending: false })
         .limit(1)
         .maybeSingle(),
+
+      db.from("account_metric_snapshots").select("daily_loss").eq("account_id", accountId).order("snapshot_at", { ascending: false }).limit(1).maybeSingle(),
+      db.from("trading_accounts").select("starting_balance, current_balance, equity, peak_equity").eq("id", accountId).maybeSingle(),
     ]);
+
+  const daily = latestMetrics.status === "fulfilled" ? latestMetrics.value.data as Record<string, unknown> | null : null;
+  const positions = openPositions.status === "fulfilled" ? openPositions.value.data as Array<{ unrealized_pnl: number | null }> : [];
+  const unrealizedPnl = positions.reduce((sum, position) => sum + Number(position.unrealized_pnl ?? 0), 0);
+  const snapshot = latestSnapshot.status === "fulfilled" ? latestSnapshot.value.data as { daily_loss: number | null } | null : null;
+  const account = accountData.status === "fulfilled" ? accountData.value.data as { starting_balance: number | null; current_balance: number | null; equity: number | null; peak_equity: number | null } | null : null;
 
   return {
     orders_today:
@@ -146,9 +168,16 @@ export async function getAccountSummaryStats(accountId: string) {
       closedPositions.status === "fulfilled"
         ? (closedPositions.value.count ?? 0)
         : 0,
-    latest_metrics:
-      latestMetrics.status === "fulfilled"
-        ? latestMetrics.value.data
-        : null,
+    latest_metrics: daily && account ? {
+      realized_pnl: daily.realized_pnl,
+      unrealized_pnl: unrealizedPnl,
+      total_trades: daily.trade_count,
+      winning_trades: daily.winning_trades,
+      losing_trades: daily.losing_trades,
+      daily_loss: snapshot?.daily_loss ?? null,
+      starting_balance: account.starting_balance,
+      ending_balance: account.current_balance,
+      peak_balance: account.peak_equity,
+    } : null,
   };
 }

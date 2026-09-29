@@ -6,7 +6,7 @@ import { RecentRiskEvents } from "@/components/dashboard/recent-risk-events";
 import { getRiskDashboardSummary } from "@/server/services/risk";
 
 export const metadata: Metadata = { title: "Risk Management" };
-export const revalidate = 30;
+export const dynamic = "force-dynamic";
 
 export default async function RiskPage() {
   const summary = await getRiskDashboardSummary();
@@ -21,7 +21,7 @@ export default async function RiskPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard title="Accounts at Risk" value={String(summary.accounts_at_risk)} description="Non-normal risk status" />
-        <StatCard title="Breached" value={String(summary.breached)} description="Limit breached" />
+        <StatCard title="Breached" value={summary.breached === null ? "—" : String(summary.breached)} description="Limit breached" />
         <StatCard title="Critical" value={String(summary.critical)} description="Near limit" />
         <StatCard title="Warning" value={String(summary.warning)} description="Approaching limit" />
       </div>

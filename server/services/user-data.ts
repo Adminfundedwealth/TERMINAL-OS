@@ -6,15 +6,15 @@ import type { Watchlist, Alert, JournalEntry } from "@/types";
 // -------------------------------------------------------
 
 export async function getWatchlists(
-  filters: { owner_user_id?: string; page?: number; page_size?: number } = {}
+  filters: { trader_id?: string; page?: number; page_size?: number } = {}
 ): Promise<{ data: Watchlist[]; total: number }> {
   const db = createServerSupabaseClient();
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(100, filters.page_size ?? 25);
   const offset = (page - 1) * pageSize;
 
-  let query = db.from("watchlists").select("*, watchlist_items(*)", { count: "exact" });
-  if (filters.owner_user_id) query = query.eq("owner_user_id", filters.owner_user_id);
+  let query = db.from("watchlists").select("*", { count: "exact" });
+  if (filters.trader_id) query = query.eq("trader_id", filters.trader_id);
 
   const { data, count, error } = await query
     .order("updated_at", { ascending: false })
