@@ -4,6 +4,7 @@ import { SettingsClient } from "@/components/operations/settings-client";
 import { getSettings } from "@/server/services/operations";
 
 export const metadata: Metadata = { title: "Terminal Settings" };
+export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const settings = await getSettings();
