@@ -11,6 +11,7 @@ import {
   getMarketDataCredentialStatus,
   getMarketDataCredentials,
   setActiveBroker,
+  testBrokerConnection,
 } from "../server/services/broker-credentials";
 
 const savedEncryptionKey = process.env.BROKER_ENCRYPTION_KEY;
@@ -201,6 +202,34 @@ describe("encrypted broker credential integration", () => {
       ["trading_account_id", "dhan-account-1"],
       ["environment", "production"],
       ["is_active", true],
+    ]);
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not decrypt or test a credential outside the selected scope", async () => {
+    const filters: Array<[string, unknown]> = [];
+    const query: Record<string, (...args: any[]) => any> = {};
+    query.select = vi.fn(() => query);
+    query.eq = vi.fn((column: string, value: unknown) => {
+      filters.push([column, value]);
+      return query;
+    });
+    query.maybeSingle = vi.fn(async () => ({ data: null, error: null }));
+    const db = { from: vi.fn(() => query), rpc: vi.fn() };
+    vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
+
+    const result = await testBrokerConnection("credential-1", {
+      trading_account_id: "account-1",
+      broker_id: "dhan",
+      environment: "production",
+    });
+
+    expect(result).toMatchObject({ success: false, implemented: false });
+    expect(filters).toEqual([
+      ["id", "credential-1"],
+      ["trading_account_id", "account-1"],
+      ["broker_id", "dhan"],
+      ["environment", "production"],
     ]);
     expect(db.rpc).not.toHaveBeenCalled();
   });

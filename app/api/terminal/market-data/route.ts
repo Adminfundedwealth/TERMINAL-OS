@@ -9,6 +9,11 @@ import {
 } from "@/server/services/broker-credentials";
 import { createStoredMarketDataProvider } from "@/server/brokers/provider-factory";
 import { MarketDataProviderError } from "@/server/brokers/provider-error";
+import {
+  normalizeMarketCandle,
+  normalizeMarketInstrument,
+  normalizeMarketQuote,
+} from "@/server/brokers/normalization";
 import type { MarketInstrument } from "@/server/brokers/types";
 
 const InstrumentSchema = z.object({
@@ -30,6 +35,7 @@ const RequestSchema = z.discriminatedUnion("operation", [
   z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("authenticate") }),
   z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("searchInstruments"), query: z.string().trim().min(1).max(100) }),
   z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getQuote"), instrument: InstrumentSchema }),
+  z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getOptionChain"), underlying: z.string().trim().min(1).max(32), expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
   z.object({
     account_id: z.string().uuid(),
     provider: z.enum(["dhan", "kite"]),
@@ -159,21 +165,39 @@ export async function POST(req: Request): Promise<NextResponse> {
         await recordMarketDataAuthentication(request.account_id, request.provider, request.environment, true, "Authentication successful.");
         break;
       case "searchInstruments":
-        data = await provider.searchInstruments(request.query);
+        data = (await provider.searchInstruments(request.query)).map((instrument) => {
+          if (instrument.provider !== request.provider) {
+            throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
+          }
+          return normalizeMarketInstrument(instrument);
+        });
         break;
-      case "getQuote":
-        data = await provider.getQuote(request.instrument as MarketInstrument);
+      case "getQuote": {
+        const quote = await provider.getQuote(request.instrument as MarketInstrument);
+        if (quote.provider !== request.provider) {
+          throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
+        }
+        data = normalizeMarketQuote(quote);
         break;
+      }
+      case "getOptionChain": {
+        const optionChain = await provider.getOptionChain(request.underlying, request.expiry);
+        if (optionChain.provider !== request.provider) {
+          throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
+        }
+        data = optionChain;
+        break;
+      }
       case "getHistoricalCandles":
         if (request.fromDate > request.toDate) {
           return json(req, { error: { code: "INVALID_REQUEST", message: "The market-data request is invalid." } }, 400);
         }
-        data = await provider.getHistoricalCandles(
+        data = (await provider.getHistoricalCandles(
           request.instrument as MarketInstrument,
           request.interval,
           request.fromDate,
           request.toDate
-        );
+        )).map(normalizeMarketCandle);
         break;
     }
     return json(req, { data });

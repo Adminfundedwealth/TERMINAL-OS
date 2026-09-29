@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { BrokerSecurityNotice } from "@/components/broker/broker-security-notice";
 import { DataSourcesPanel } from "@/components/broker/data-sources-panel";
 import { MarketDatabasePanel } from "@/components/broker/market-database-panel";
@@ -31,6 +32,7 @@ interface AccountOption {
 }
 
 export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabId>("available");
   const [savedRows, setSavedRows] = useState<EnrichedRow[]>([]);
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
@@ -141,14 +143,28 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
     await fetchSaved();
   }
 
-  async function handleTest(id: string, _provider: BrokerProviderDef): Promise<string> {
-    const res = await fetch(`/api/terminal/broker/${id}/test`, { method: "POST" });
+  async function handleTest(id: string, provider: BrokerProviderDef): Promise<string> {
+    if (isAccountScopedProvider(provider.id) && !selectedAccountId) {
+      throw new Error("Select an active trading account before testing Dhan or Kite credentials.");
+    }
+    const res = await fetch(`/api/terminal/broker/${id}/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trading_account_id: selectedAccountId,
+        broker_id: provider.id,
+        environment: "production",
+      }),
+    });
     const j = await res.json();
     if (!res.ok) throw new Error(j?.error?.message ?? "Test failed.");
     const result = j.data as { success: boolean; message: string; implemented: boolean };
+    await Promise.all([
+      fetchSaved(),
+      queryClient.invalidateQueries({ queryKey: ["market-data-health", selectedAccountId] }),
+    ]);
     if (!result.implemented) return `Not implemented: ${result.message}`;
     if (!result.success) throw new Error(result.message);
-    await fetchSaved();
     return result.message;
   }
 
@@ -203,7 +219,7 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
       )}
 
       {/* Connection Status - individual service rows with Test button */}
-      <DataSourcesPanel />
+      <DataSourcesPanel accountId={selectedAccountId} />
 
       {/* Market Database - download panel */}
       <MarketDatabasePanel />

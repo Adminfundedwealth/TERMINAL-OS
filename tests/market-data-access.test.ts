@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createRouteHandlerSupabaseClient, rpc } = vi.hoisted(() => ({
+const { createRouteHandlerSupabaseClient, rpc, getMarketDataCredentials } = vi.hoisted(() => ({
   createRouteHandlerSupabaseClient: vi.fn(),
   rpc: vi.fn(),
+  getMarketDataCredentials: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/route-handler-client", () => ({ createRouteHandlerSupabaseClient }));
+vi.mock("@/server/services/broker-credentials", () => ({ getMarketDataCredentials }));
 
 import { MarketDataProviderError } from "../server/brokers/provider-error";
-import { authorizeMarketDataAccount } from "../server/services/market-data-access";
+import {
+  authorizeMarketDataAccount,
+  authorizeRealtimeMarketDataSubscription,
+} from "../server/services/market-data-access";
 
 const account = {
   id: "account-1",
@@ -21,6 +26,7 @@ const account = {
 beforeEach(() => {
   vi.clearAllMocks();
   createRouteHandlerSupabaseClient.mockResolvedValue({ rpc });
+  getMarketDataCredentials.mockResolvedValue({ client_id: "server-only-test-value", access_token: "server-only-test-value" });
 });
 
 describe("customer market-data account authorization", () => {
@@ -80,5 +86,56 @@ describe("customer market-data account authorization", () => {
 
     await expect(authorizeMarketDataAccount("customer-jwt", "customer-1", "account-1", "kite"))
       .resolves.toMatchObject({ broker_provider: "zerodha" });
+  });
+
+  it("rejects a realtime subscription without an account before credential lookup", async () => {
+    await expect(authorizeRealtimeMarketDataSubscription("customer-jwt", "customer-1", {
+      account_id: "",
+      provider: "dhan",
+      environment: "production",
+    })).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(getMarketDataCredentials).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unowned realtime account before credential lookup", async () => {
+    rpc.mockResolvedValue({ data: { account: { ...account, owner_user_id: "other-customer" } }, error: null });
+
+    await expect(authorizeRealtimeMarketDataSubscription("customer-jwt", "customer-1", {
+      account_id: "account-1",
+      provider: "dhan",
+      environment: "production",
+    })).rejects.toMatchObject({ code: "ACCOUNT_NOT_FOUND" });
+    expect(getMarketDataCredentials).not.toHaveBeenCalled();
+  });
+
+  it("retrieves realtime credentials only after account authorization with the requested environment", async () => {
+    rpc.mockResolvedValue({ data: { account }, error: null });
+    getMarketDataCredentials.mockResolvedValueOnce({ client_id: "fake-client", access_token: "fake-access" });
+
+    const result = await authorizeRealtimeMarketDataSubscription("customer-jwt", "customer-1", {
+      account_id: "account-1",
+      provider: "kite",
+      environment: "paper",
+    });
+
+    expect(getMarketDataCredentials).toHaveBeenCalledWith("account-1", "kite", "paper");
+    expect(result).toMatchObject({
+      account: { id: "account-1", owner_user_id: "customer-1" },
+      provider: "kite",
+      environment: "paper",
+      credentials: { client_id: "fake-client", access_token: "fake-access" },
+    });
+  });
+
+  it("rejects a realtime subscription without an active scoped credential", async () => {
+    rpc.mockResolvedValue({ data: { account }, error: null });
+    getMarketDataCredentials.mockRejectedValueOnce(new MarketDataProviderError("dhan", "MISSING_CREDENTIALS"));
+
+    await expect(authorizeRealtimeMarketDataSubscription("customer-jwt", "customer-1", {
+      account_id: "account-1",
+      provider: "dhan",
+      environment: "production",
+    })).rejects.toMatchObject({ code: "MISSING_CREDENTIALS" });
+    expect(getMarketDataCredentials).toHaveBeenCalledWith("account-1", "dhan", "production");
   });
 });

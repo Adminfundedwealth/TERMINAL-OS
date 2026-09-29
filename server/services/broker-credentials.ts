@@ -102,12 +102,41 @@ export async function getBrokerCredentialById(
   return toCredentialRow(data as StoredBrokerCredential);
 }
 
-async function getDecryptedCredential(id: string): Promise<{ row: StoredBrokerCredential; credentials: Record<string, string> } | null> {
+export interface BrokerCredentialTestScope {
+  trading_account_id: string;
+  broker_id: "dhan" | "zerodha";
+  environment: "production" | "paper" | "sandbox";
+}
+
+export async function getBrokerCredentialTestTarget(
+  id: string,
+  scope: BrokerCredentialTestScope
+): Promise<string | null> {
+  const db = createServerSupabaseClient();
+  const { data, error } = await db
+    .from("broker_credentials")
+    .select("id")
+    .eq("id", id)
+    .eq("trading_account_id", scope.trading_account_id)
+    .eq("broker_id", scope.broker_id)
+    .eq("environment", scope.environment)
+    .maybeSingle();
+  if (error) throw new Error("Failed to load broker credential metadata.");
+  return data?.id ?? null;
+}
+
+async function getDecryptedCredential(
+  id: string,
+  scope: BrokerCredentialTestScope
+): Promise<{ row: StoredBrokerCredential; credentials: Record<string, string> } | null> {
   const db = createServerSupabaseClient();
   const { data, error } = await db
     .from("broker_credentials")
     .select(CREDENTIAL_COLUMNS)
     .eq("id", id)
+    .eq("trading_account_id", scope.trading_account_id)
+    .eq("broker_id", scope.broker_id)
+    .eq("environment", scope.environment)
     .maybeSingle();
   if (error || !data) return null;
   const row = data as StoredBrokerCredential;
@@ -320,10 +349,11 @@ export async function setActiveBroker(id: string, _employeeId: string): Promise<
 }
 
 export async function testBrokerConnection(
-  id: string
+  id: string,
+  scope: BrokerCredentialTestScope,
 ): Promise<{ success: boolean; message: string; implemented: boolean }> {
   try {
-    const loaded = await getDecryptedCredential(id);
+    const loaded = await getDecryptedCredential(id, scope);
     if (!loaded) return { success: false, message: "Broker credentials were not found.", implemented: false };
     const provider = loaded.row.broker_id === "dhan"
       ? new DhanMarketDataProvider(loaded.credentials)
@@ -337,7 +367,10 @@ export async function testBrokerConnection(
       is_connected: true,
       last_tested_at: new Date().toISOString(),
       last_test_result: "Authentication successful.",
-    }).eq("id", id);
+    }).eq("id", id)
+      .eq("trading_account_id", scope.trading_account_id)
+      .eq("broker_id", scope.broker_id)
+      .eq("environment", scope.environment);
     return { success: true, message: "Authentication successful.", implemented: true };
   } catch (err) {
     const message = err instanceof MarketDataProviderError ? err.message : "Broker authentication failed.";
@@ -346,12 +379,18 @@ export async function testBrokerConnection(
       is_connected: false,
       last_tested_at: new Date().toISOString(),
       last_test_result: message,
-    }).eq("id", id);
+    }).eq("id", id)
+      .eq("trading_account_id", scope.trading_account_id)
+      .eq("broker_id", scope.broker_id)
+      .eq("environment", scope.environment);
     return { success: false, message, implemented: true };
   }
 }
 
-export async function testDhanConnection(id: string): Promise<{ success: boolean; message: string }> {
-  const result = await testBrokerConnection(id);
+export async function testDhanConnection(
+  id: string,
+  scope: BrokerCredentialTestScope,
+): Promise<{ success: boolean; message: string }> {
+  const result = await testBrokerConnection(id, scope);
   return { success: result.success, message: result.message };
 }

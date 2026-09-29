@@ -1,5 +1,6 @@
 import "server-only";
 import { parseCsv } from "./csv";
+import { normalizeMarketOptionChain } from "./normalization";
 import { MarketDataProviderError } from "./provider-error";
 import type {
   BrokerCredentialMap,
@@ -7,12 +8,21 @@ import type {
   MarketCandle,
   MarketDataProvider,
   MarketInstrument,
+  MarketOptionChain,
+  MarketOptionLeg,
   MarketQuote,
 } from "./types";
 
 const KITE_API = "https://api.kite.trade";
 const KITE_EXCHANGES = new Set(["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX"]);
 const INTERVALS = new Set(["minute", "3minute", "5minute", "10minute", "15minute", "30minute", "60minute", "day"]);
+const OPTION_UNDERLYINGS: Record<string, string[]> = {
+  NIFTY: ["NIFTY", "NIFTY 50"],
+  BANKNIFTY: ["BANKNIFTY", "NIFTY BANK"],
+  FINNIFTY: ["FINNIFTY", "NIFTY FIN SERVICE", "NIFTY FINANCIAL SERVICES"],
+  MIDCPNIFTY: ["MIDCPNIFTY", "NIFTY MID SELECT", "NIFTY MIDCAP 50"],
+};
+const OPTION_QUOTE_BATCH_SIZE = 75;
 
 function credential(credentials: BrokerCredentialMap, ...keys: string[]): string {
   for (const key of keys) {
@@ -122,6 +132,68 @@ export class KiteMarketDataProvider implements MarketDataProvider {
     }));
   }
 
+  async getOptionChain(underlying: string, expiry?: string): Promise<MarketOptionChain> {
+    const normalizedUnderlying = underlying.trim().toUpperCase();
+    const aliases = OPTION_UNDERLYINGS[normalizedUnderlying] ?? [normalizedUnderlying];
+    const instruments = await this.getInstrumentMaster();
+    const contracts = instruments.filter((instrument) =>
+      (["NFO", "NSE_FNO"].includes(instrument.exchangeSegment) || instrument.exchangeSegment.startsWith("NFO") || instrument.exchange === "NFO") &&
+      (instrument.optionType === "CE" || instrument.optionType === "PE") &&
+      aliases.includes(instrument.symbol.toUpperCase()) &&
+      Boolean(instrument.expiryDate) &&
+      (!expiry || instrument.expiryDate === expiry)
+    );
+    const expiries = [...new Set(contracts.map((item) => item.expiryDate as string))].sort();
+    const selectedExpiry = expiry ?? expiries[0];
+    if (!selectedExpiry) throw new MarketDataProviderError("kite", "INVALID_INSTRUMENT");
+
+    const selectedContracts = contracts.filter((item) => item.expiryDate === selectedExpiry);
+    const quoteRows: Array<[MarketInstrument, Record<string, unknown>]> = [];
+    for (let offset = 0; offset < selectedContracts.length; offset += OPTION_QUOTE_BATCH_SIZE) {
+      const batch = selectedContracts.slice(offset, offset + OPTION_QUOTE_BATCH_SIZE);
+      const query = new URLSearchParams();
+      for (const instrument of batch) query.append("i", `${instrument.exchange}:${instrument.tradingSymbol}`);
+      const payload = await this.readJson(await this.fetcher(`${KITE_API}/quote?${query}`, {
+        headers: this.headers(),
+        cache: "no-store",
+      }));
+      for (const instrument of batch) {
+        const key = `${instrument.exchange}:${instrument.tradingSymbol}`;
+        const quote = payload.data?.[key];
+        if (quote) quoteRows.push([instrument, quote]);
+      }
+    }
+
+    const strikes = new Map<number, { call: MarketOptionLeg | null; put: MarketOptionLeg | null }>();
+    for (const [instrument, quote] of quoteRows) {
+      if (instrument.strikePrice === undefined) continue;
+      const row = strikes.get(instrument.strikePrice) ?? { call: null, put: null };
+      row[instrument.optionType === "CE" ? "call" : "put"] = normalizeKiteOptionLeg(quote);
+      strikes.set(instrument.strikePrice, row);
+    }
+
+    const underlyingNames = aliases.map((value) => value.toUpperCase());
+    const underlyingInstrument = instruments.find((instrument) =>
+      instrument.exchange === "NSE" && instrument.instrumentType === "INDEX" &&
+      (underlyingNames.includes(instrument.symbol.toUpperCase()) || underlyingNames.includes(instrument.tradingSymbol.toUpperCase()))
+    );
+    let spotPrice = 0;
+    if (!underlyingInstrument) throw new MarketDataProviderError("kite", "INVALID_INSTRUMENT");
+    spotPrice = (await this.getQuote(underlyingInstrument)).ltp;
+    if (!Number.isFinite(spotPrice) || spotPrice <= 0) {
+      throw new MarketDataProviderError("kite", "UPSTREAM_ERROR");
+    }
+
+    return normalizeMarketOptionChain({
+      provider: "kite",
+      underlying: normalizedUnderlying,
+      expiry: selectedExpiry,
+      expiries,
+      spotPrice,
+      rows: [...strikes.entries()].map(([strike, legs]) => ({ strike, ...legs })),
+    });
+  }
+
   private headers(): HeadersInit {
     return {
       Accept: "application/json",
@@ -196,4 +268,22 @@ export class KiteMarketDataProvider implements MarketDataProvider {
       optionType: row.instrument_type === "CE" || row.instrument_type === "PE" ? row.instrument_type : undefined,
     };
   }
+}
+
+function normalizeKiteOptionLeg(quote: Record<string, any>): MarketOptionLeg {
+  const ltp = numeric(quote.last_price);
+  const previousClose = numeric(quote.ohlc?.close);
+  const change = ltp !== null && previousClose !== null ? ltp - previousClose : null;
+  return {
+    ltp,
+    bid: numeric(quote.depth?.buy?.[0]?.price),
+    ask: numeric(quote.depth?.sell?.[0]?.price),
+    volume: numeric(quote.volume),
+    oi: numeric(quote.oi),
+    change,
+    change_percent: previousClose && change !== null ? (change / previousClose) * 100 : null,
+    iv: null,
+    oi_change: null,
+    greeks: null,
+  };
 }

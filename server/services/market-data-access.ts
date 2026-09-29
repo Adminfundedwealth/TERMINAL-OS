@@ -2,6 +2,7 @@ import "server-only";
 import { createRouteHandlerSupabaseClient } from "@/lib/supabase/route-handler-client";
 import { MarketDataProviderError } from "@/server/brokers/provider-error";
 import type { MarketDataProviderId } from "@/server/brokers/types";
+import { getMarketDataCredentials } from "@/server/services/broker-credentials";
 
 export interface AuthorizedMarketDataAccount {
   id: string;
@@ -31,4 +32,42 @@ export async function authorizeMarketDataAccount(
   }
 
   return account;
+}
+
+export interface RealtimeMarketDataSubscription {
+  account_id: string;
+  provider: MarketDataProviderId;
+  environment: "production" | "paper" | "sandbox";
+}
+
+export interface AuthorizedRealtimeMarketDataSubscription {
+  account: AuthorizedMarketDataAccount;
+  provider: MarketDataProviderId;
+  environment: RealtimeMarketDataSubscription["environment"];
+  credentials: Record<string, string>;
+}
+
+/** Server-side only: returns credentials to a trusted persistent-service caller after authorization. */
+export async function authorizeRealtimeMarketDataSubscription(
+  accessToken: string,
+  userId: string,
+  subscription: RealtimeMarketDataSubscription
+): Promise<AuthorizedRealtimeMarketDataSubscription> {
+  const account = await authorizeMarketDataAccount(
+    accessToken,
+    userId,
+    subscription.account_id,
+    subscription.provider
+  );
+  const credentials = await getMarketDataCredentials(
+    account.id,
+    subscription.provider,
+    subscription.environment
+  );
+  return {
+    account,
+    provider: subscription.provider,
+    environment: subscription.environment,
+    credentials,
+  };
 }

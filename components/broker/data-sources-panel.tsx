@@ -1,127 +1,79 @@
 "use client";
 
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
-import { Zap, Radio, Globe, BarChart2, Server, Loader2 } from "lucide-react";
+import { RefreshCw, Radio, Globe, BarChart2, Server, Zap } from "lucide-react";
 
-type SourceStatus = "online" | "warning" | "offline" | "unknown";
+type SourceStatus = "ONLINE" | "OFFLINE" | "ERROR" | "NOT_IMPLEMENTED";
 
-interface DataSource {
+interface DataSourceHealth {
   id: string;
-  label: string;
-  sublabel: string;
-  Icon: React.ElementType;
   status: SourceStatus;
-  canTest: boolean;
+  detail: string;
+  response_time_ms: number | null;
 }
 
-const INITIAL: DataSource[] = [
-  {
-    id: "dhan_api",
-    label: "Dhan API (Primary)",
-    sublabel: "Click Test to verify - provides Option Chain, Greeks, Live Ticks",
-    Icon: Zap,
-    status: "unknown",
-    canTest: true,
-  },
-  {
-    id: "dhan_ws",
-    label: "Dhan WebSocket",
-    sublabel: "Requires Dhan credentials - Real-time index + VIX ticks",
-    Icon: Radio,
-    status: "unknown",
-    canTest: false,
-  },
-  {
-    id: "nse",
-    label: "NSE India (Fallback)",
-    sublabel: "Fallback - Indices, Sectors, A/D, Option Chain if Dhan fails",
-    Icon: Globe,
-    status: "unknown",
-    canTest: false,
-  },
-  {
-    id: "tv",
-    label: "TradingView Scanner",
-    sublabel: "No auth needed - 100+ F&O stocks LTP, Volume, Sectors",
-    Icon: BarChart2,
-    status: "unknown",
-    canTest: false,
-  },
-  {
-    id: "proxy",
-    label: "Proxy Server",
-    sublabel: "Routes all API traffic",
-    Icon: Server,
-    status: "unknown",
-    canTest: false,
-  },
-];
-
-const DOT_COLOR: Record<SourceStatus, string> = {
-  online: "bg-emerald-500",
-  warning: "bg-amber-500",
-  offline: "bg-red-500",
-  unknown: "bg-slate-500",
+const SOURCE_DETAILS: Record<string, { label: string; Icon: React.ElementType }> = {
+  terminal_api: { label: "Terminal OS API", Icon: Server },
+  nse: { label: "NSE fallback", Icon: Globe },
+  tradingview: { label: "TradingView Scanner", Icon: BarChart2 },
+  dhan: { label: "Dhan API", Icon: Zap },
+  dhan_websocket: { label: "Dhan WebSocket", Icon: Radio },
 };
 
-export function DataSourcesPanel() {
-  const [sources, setSources] = useState<DataSource[]>(INITIAL);
-  const [testing, setTesting] = useState<string | null>(null);
-  const [testMsg, setTestMsg] = useState<string | null>(null);
+const STATUS_STYLE: Record<SourceStatus, { color: string; dot: string }> = {
+  ONLINE: { color: "text-emerald-400", dot: "bg-emerald-500" },
+  OFFLINE: { color: "text-slate-400", dot: "bg-slate-500" },
+  ERROR: { color: "text-red-400", dot: "bg-red-500" },
+  NOT_IMPLEMENTED: { color: "text-amber-400", dot: "bg-amber-500" },
+};
 
-  const onlineCount = sources.filter((s) => s.status === "online").length;
+export function DataSourcesPanel({ accountId }: { accountId: string }) {
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
+    queryKey: ["market-data-health", accountId],
+    queryFn: async () => {
+      const query = new URLSearchParams({ account_id: accountId });
+      const response = await fetch(`/api/terminal/market-data/health?${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Market-data health request failed.");
+      return response.json() as Promise<{ data: DataSourceHealth[] }>;
+    },
+    enabled: Boolean(accountId),
+    retry: false,
+    refetchInterval: 30_000,
+  });
 
-  async function handleTest(id: string) {
-    setTesting(id);
-    setTestMsg(null);
-    try {
-      // Real test: try to hit the broker API
-      const res = await fetch("/api/terminal/broker");
-      if (res.ok) {
-        const { data } = await res.json();
-        const hasDhan = (data ?? []).some((r: { broker_id: string }) => r.broker_id === "dhan");
-        if (hasDhan) {
-          setSources((p) => p.map((s) => s.id === id ? { ...s, status: "online" } : s));
-          setTestMsg("Dhan credentials found. Run a live connection test from the Connected tab.");
-        } else {
-          setSources((p) => p.map((s) => s.id === id ? { ...s, status: "offline" } : s));
-          setTestMsg("No Dhan credentials saved yet. Add them in the Available tab.");
-        }
-      } else {
-        setSources((p) => p.map((s) => s.id === id ? { ...s, status: "offline" } : s));
-        setTestMsg("API check failed.");
-      }
-    } catch {
-      setTestMsg("Connection check failed.");
-    } finally {
-      setTesting(null);
-    }
-  }
+  const sourceRows = (data?.data ?? []).map((source) => ({
+    ...source,
+    ...(SOURCE_DETAILS[source.id] ?? { label: source.id, Icon: Server }),
+  }));
+  const onlineCount = sourceRows.filter((source) => source.status === "ONLINE").length;
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div>
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Zap className="h-4 w-4 text-cyan-400" />
             Connection Status
           </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Real-time status of all data sources
-          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Live checks; Dhan status uses its most recent explicit authentication test.</p>
         </div>
-        {onlineCount > 0 && (
-          <span className="text-xs font-semibold text-muted-foreground">
-            {onlineCount}/5 Online
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-semibold text-muted-foreground">ONLINE {onlineCount}/5</span>
+          <button
+            aria-label="Refresh service health"
+            title="Refresh service health"
+            onClick={() => void refetch()}
+            disabled={isFetching || !accountId}
+            className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+          </button>
+        </div>
       </div>
 
-      {/* Source rows */}
       <div className="divide-y divide-border/60">
-        {sources.map(({ id, label, sublabel, Icon, status, canTest }) => (
+        {sourceRows.map(({ id, label, Icon, status, detail, response_time_ms }) => (
           <div
             key={id}
             className="flex items-center justify-between gap-3 px-4 py-2.5"
@@ -133,36 +85,23 @@ export function DataSourcesPanel() {
                 <span
                   className={cn(
                     "absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full border border-card",
-                    DOT_COLOR[status]
+                    STATUS_STYLE[status].dot
                   )}
                 />
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-medium text-foreground leading-tight">{label}</p>
-                <p className="text-[10px] text-muted-foreground leading-tight mt-0.5 truncate">
-                  {sublabel}
+                <p className={cn("text-xs font-medium leading-tight", STATUS_STYLE[status].color)}>{label} · {status}</p>
+                <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                  {response_time_ms === null ? detail : `${detail} (${response_time_ms} ms)`}
                 </p>
               </div>
             </div>
-            {canTest && (
-              <button
-                onClick={() => handleTest(id)}
-                disabled={testing === id}
-                className="shrink-0 text-xs font-medium text-foreground bg-transparent border border-border/80 hover:border-foreground/40 px-3 py-1 rounded transition-colors disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap"
-              >
-                {testing === id && <Loader2 className="h-3 w-3 animate-spin" />}
-                Test
-              </button>
-            )}
           </div>
         ))}
       </div>
-
-      {testMsg && (
-        <div className="px-4 py-2 border-t border-border text-xs text-muted-foreground bg-muted/20">
-          {testMsg}
-        </div>
-      )}
+      {!accountId && <p className="px-4 py-2 text-xs text-muted-foreground">Select an active trading account to inspect Dhan status.</p>}
+      {isLoading && <p className="px-4 py-2 text-xs text-muted-foreground">Checking service health…</p>}
+      {isError && <p className="px-4 py-2 text-xs text-red-400">Health checks could not be loaded.</p>}
     </div>
   );
 }

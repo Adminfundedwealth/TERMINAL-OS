@@ -31,9 +31,60 @@ const account = {
 
 const provider = {
   authenticate: vi.fn(async () => ({ authenticated: true as const })),
-  searchInstruments: vi.fn(async () => [{ provider: "dhan", providerInstrumentId: "13", symbol: "NIFTY" }]),
-  getQuote: vi.fn(async () => ({ provider: "dhan", symbol: "NIFTY", ltp: 25000 })),
+  searchInstruments: vi.fn(async () => [{
+    provider: "dhan" as "dhan" | "kite",
+    providerInstrumentId: "13",
+    symbol: "NIFTY",
+    tradingSymbol: "NIFTY 50",
+    exchange: "NSE",
+    exchangeSegment: "IDX_I",
+    instrumentType: "INDEX",
+  }]),
+  getQuote: vi.fn(async () => ({
+    provider: "dhan" as "dhan" | "kite",
+    symbol: "NIFTY",
+    tradingSymbol: "NIFTY 50",
+    exchange: "NSE",
+    ltp: 25000,
+    open: 24900,
+    high: 25100,
+    low: 24800,
+    previousClose: 24950,
+    change: 50,
+    changePercent: 0.2,
+    volume: 10,
+    openInterest: null,
+    timestamp: "2026-09-30T00:00:00.000Z",
+  })),
   getHistoricalCandles: vi.fn(async () => [{ timestamp: "2026-09-28T09:15:00+05:30", open: 100, high: 105, low: 99, close: 103, volume: 10 }]),
+  getOptionChain: vi.fn(async () => ({
+    provider: "dhan" as "dhan" | "kite",
+    underlying: "NIFTY",
+    expiry: "2026-10-01",
+    expiries: ["2026-10-01"],
+    spot_price: 25000,
+    spotPrice: 25000,
+    chain: [{
+      underlying: "NIFTY",
+      expiry: "2026-10-01",
+      strike: 25000,
+      call: { ltp: 100, bid: 99, ask: 101, volume: 10, oi: 20, change: 1, change_percent: 1, iv: 12, oi_change: 2, greeks: null },
+      put: null,
+      timestamp: "2026-09-30T00:00:00.000Z",
+      strikePrice: 25000,
+      ce: { ltp: 100, oi: 20, oiChange: 2, volume: 10, iv: 12, delta: 0, gamma: 0, theta: 0, vega: 0, bidPrice: 99, askPrice: 101 },
+      pe: { ltp: 0, oi: 0, oiChange: 0, volume: 0, iv: 0, delta: 0, gamma: 0, theta: 0, vega: 0, bidPrice: 0, askPrice: 0 },
+    }],
+    total_call_oi: 20,
+    total_put_oi: 0,
+    totalCEOI: 20,
+    totalPEOI: 0,
+    greeks_available: false,
+    greeksAvailable: false,
+    depth_available: true,
+    timestamp: "2026-09-30T00:00:00.000Z",
+    source: "broker" as const,
+  })),
 };
 
 function post(body: Record<string, unknown>, headers: Record<string, string> = { authorization: "Bearer customer-jwt" }) {
@@ -120,12 +171,134 @@ describe("account-scoped market-data API", () => {
   });
 
   it.each([["dhan", "production"], ["kite", "paper"]] as const)("routes authorized %s %s requests to its account/environment provider", async (broker, environment) => {
+    provider.searchInstruments.mockResolvedValueOnce([{
+      provider: broker,
+      providerInstrumentId: "13",
+      symbol: "NIFTY",
+      tradingSymbol: "NIFTY 50",
+      exchange: "NSE",
+      exchangeSegment: "IDX_I",
+      instrumentType: "INDEX",
+    }]);
     const response = await POST(post({ account_id: "11111111-1111-4111-8111-111111111111", provider: broker, environment, operation: "searchInstruments", query: "NIFTY" }));
 
     expect(response.status).toBe(200);
     expect(mocks.authorizeMarketDataAccount).toHaveBeenCalledWith("customer-jwt", "customer-1", "11111111-1111-4111-8111-111111111111", broker);
     expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111", broker, environment);
-    expect((await responseBody(response)).data).toEqual([{ provider: "dhan", providerInstrumentId: "13", symbol: "NIFTY" }]);
+    expect((await responseBody(response)).data).toEqual([{
+      provider: broker,
+      providerInstrumentId: "13",
+      symbol: "NIFTY",
+      tradingSymbol: "NIFTY 50",
+      exchange: "NSE",
+      exchangeSegment: "IDX_I",
+      instrumentType: "INDEX",
+      display_name: "NIFTY 50",
+      segment: "IDX_I",
+      instrument_token: "13",
+    }]);
+  });
+
+  it("rejects adapter instruments whose provider differs from the requested provider", async () => {
+    mocks.createStoredMarketDataProvider.mockResolvedValue({
+      ...provider,
+      searchInstruments: vi.fn(async () => [{
+        provider: "kite",
+        providerInstrumentId: "256265",
+        symbol: "NIFTY",
+        tradingSymbol: "NIFTY 50",
+        exchange: "NSE",
+        exchangeSegment: "INDICES",
+        instrumentType: "INDEX",
+      }]),
+    });
+
+    const response = await POST(post({
+      account_id: account.id,
+      provider: "dhan",
+      operation: "searchInstruments",
+      query: "NIFTY",
+    }));
+
+    expect(response.status).toBe(400);
+    expect((await responseBody(response)).error.code).toBe("INVALID_INSTRUMENT");
+  });
+
+  it("returns stable quote and candle fields while retaining legacy camelCase quote aliases", async () => {
+    const instrument = {
+      provider: "dhan",
+      providerInstrumentId: "13",
+      symbol: "NIFTY",
+      tradingSymbol: "NIFTY 50",
+      exchange: "NSE",
+      exchangeSegment: "IDX_I",
+      instrumentType: "INDEX",
+    };
+    const quoteResponse = await POST(post({ account_id: account.id, provider: "dhan", operation: "getQuote", instrument }));
+    expect((await responseBody(quoteResponse)).data).toMatchObject({
+      symbol: "NIFTY",
+      ltp: 25000,
+      change: 50,
+      changePercent: 0.2,
+      change_percent: 0.2,
+      bid: null,
+      ask: null,
+      volume: 10,
+      timestamp: "2026-09-30T00:00:00.000Z",
+    });
+
+    const candleResponse = await POST(post({
+      account_id: account.id,
+      provider: "dhan",
+      operation: "getHistoricalCandles",
+      instrument,
+      interval: "5m",
+      fromDate: "2026-09-29",
+      toDate: "2026-09-30",
+    }));
+    expect((await responseBody(candleResponse)).data).toEqual([
+      { timestamp: "2026-09-28T09:15:00+05:30", open: 100, high: 105, low: 99, close: 103, volume: 10 },
+    ]);
+  });
+
+  it("routes account-scoped option-chain requests through the selected provider and preserves the normalized chain contract", async () => {
+    const response = await POST(post({
+      account_id: account.id,
+      provider: "dhan",
+      environment: "production",
+      operation: "getOptionChain",
+      underlying: "NIFTY",
+      expiry: "2026-10-01",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeMarketDataAccount).toHaveBeenCalledWith("customer-jwt", "customer-1", account.id, "dhan");
+    expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith(account.id, "dhan", "production");
+    expect(mocks.createStoredMarketDataProvider.mock.results[0].value).toBeDefined();
+    expect((await responseBody(response)).data).toMatchObject({
+      provider: "dhan",
+      underlying: "NIFTY",
+      expiry: "2026-10-01",
+      chain: [{ strike: 25000, call: { ltp: 100 }, put: null, strikePrice: 25000 }],
+    });
+  });
+
+  it("rejects an option-chain response from a different provider", async () => {
+    mocks.createStoredMarketDataProvider.mockResolvedValue({
+      ...provider,
+      getOptionChain: vi.fn(async () => ({ provider: "kite", underlying: "NIFTY" })),
+    });
+
+    const response = await POST(post({
+      account_id: account.id,
+      provider: "dhan",
+      operation: "getOptionChain",
+      underlying: "NIFTY",
+      expiry: "2026-10-01",
+    }));
+
+    expect(response.status).toBe(400);
+    expect((await responseBody(response)).error.code).toBe("INVALID_INSTRUMENT");
   });
 
   it("returns a normalized safe failure when the active account credential is missing", async () => {
