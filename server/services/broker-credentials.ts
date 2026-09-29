@@ -222,17 +222,11 @@ export async function createBrokerCredential(
   if (payload.trading_account_id) {
     const { data: account, error: accountError } = await db
       .from("trading_accounts")
-      .select("id, broker_provider")
+      .select("id")
       .eq("id", payload.trading_account_id)
       .maybeSingle();
-    const provider = String(account?.broker_provider ?? "").trim().toLowerCase();
-    const matchesProvider = payload.broker_id === "dhan"
-      ? provider === "dhan"
-      : payload.broker_id === "zerodha"
-        ? provider === "kite" || provider === "zerodha"
-        : provider === payload.broker_id;
-    if (accountError || !account || !matchesProvider) {
-      throw new Error("The broker provider does not match the trading account.");
+    if (accountError || !account) {
+      throw new Error("The selected trading account was not found.");
     }
   }
 

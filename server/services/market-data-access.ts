@@ -6,7 +6,6 @@ import type { MarketDataProviderId } from "@/server/brokers/types";
 export interface AuthorizedMarketDataAccount {
   id: string;
   owner_user_id: string;
-  broker_provider: string | null;
   status: string;
   is_active: boolean;
 }
@@ -29,14 +28,6 @@ export async function authorizeMarketDataAccount(
   }
   if (account.status?.toLowerCase() !== "active" || account.is_active !== true) {
     throw new MarketDataProviderError(provider, "ACCOUNT_INACTIVE");
-  }
-
-  const configuredProvider = account.broker_provider?.trim().toLowerCase();
-  const providerMatches = provider === "dhan"
-    ? configuredProvider === "dhan"
-    : configuredProvider === "kite" || configuredProvider === "zerodha";
-  if (!providerMatches) {
-    throw new MarketDataProviderError(provider, "INVALID_PROVIDER_ACCOUNT");
   }
 
   return account;

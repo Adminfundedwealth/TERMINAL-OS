@@ -63,11 +63,16 @@ describe("customer market-data account authorization", () => {
     expect((error as Error).message).not.toContain("not owned");
   });
 
-  it("rejects provider/account mismatches, including Kite on a Dhan account", async () => {
-    rpc.mockResolvedValue({ data: { account }, error: null });
+  it("authorizes an active account without an account-level broker association", async () => {
+    const { broker_provider: _brokerProvider, ...unassignedAccount } = account;
+    rpc.mockResolvedValue({ data: { account: unassignedAccount }, error: null });
 
+    await expect(authorizeMarketDataAccount("customer-jwt", "customer-1", "account-1", "dhan"))
+      .resolves.toMatchObject({ id: "account-1", owner_user_id: "customer-1" });
+
+    rpc.mockResolvedValue({ data: { account: { ...unassignedAccount, broker_provider: null } }, error: null });
     await expect(authorizeMarketDataAccount("customer-jwt", "customer-1", "account-1", "kite"))
-      .rejects.toMatchObject({ code: "INVALID_PROVIDER_ACCOUNT" });
+      .resolves.toMatchObject({ id: "account-1", owner_user_id: "customer-1" });
   });
 
   it("accepts the canonical Zerodha account provider for the Kite market-data provider", async () => {
