@@ -165,44 +165,51 @@ async function checkTradingView(fetcher: Fetcher): Promise<MarketDataHealthCheck
 
 async function checkDhan(accountId: string | null): Promise<MarketDataHealthCheck> {
   const started = Date.now();
-  if (!accountId) return result("dhan", "OFFLINE", started, "Select a trading account to inspect Dhan status.");
 
   try {
     const db = createServerSupabaseClient();
-    const { data: account, error: accountError } = await db
-      .from("trading_accounts")
-      .select("id,status,is_active")
-      .eq("id", accountId)
-      .maybeSingle();
-    if (accountError || !account) return result("dhan", "ERROR", started, "Trading account status is unavailable.");
-    if (String(account.status).toLowerCase() !== "active" || account.is_active !== true) {
-      return result("dhan", "OFFLINE", started, "Trading account is inactive.");
+    if (accountId) {
+      const { data: account, error: accountError } = await db
+        .from("trading_accounts")
+        .select("id,status,is_active")
+        .eq("id", accountId)
+        .maybeSingle();
+      if (accountError || !account) return result("dhan", "ERROR", started, "Trading account status is unavailable.");
+      if (String(account.status).toLowerCase() !== "active" || account.is_active !== true) {
+        return result("dhan", "OFFLINE", started, "Trading account is inactive.");
+      }
     }
 
-    const { data: row, error } = await db
-      .from("broker_credentials")
-      .select("is_active,is_connected,last_tested_at,last_test_result")
-      .eq("trading_account_id", accountId)
-      .eq("broker_id", "dhan")
-      .eq("environment", "production")
-      .maybeSingle();
-    if (error) return result("dhan", "ERROR", started, "Dhan credential status is unavailable.");
-    if (!row) return result("dhan", "OFFLINE", started, "No Dhan production credential is saved for this account.");
-    const priorResult = String(row.last_test_result ?? "").toLowerCase();
-    if (row.is_connected === true) {
-      return row.is_active === true
-        ? result("dhan", "ONLINE", started, "Most recent Dhan authentication test succeeded.")
-        : result("dhan", "OFFLINE", started, "Dhan authentication succeeded, but the credential is inactive for gateway use.");
+    let connectionId: string | null = null;
+    if (accountId) {
+      const { data: binding, error: bindingError } = await db
+        .from("trading_account_broker_connections")
+        .select("broker_connection_id")
+        .eq("trading_account_id", accountId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (bindingError) return result("dhan", "ERROR", started, "Dhan binding status is unavailable.");
+      connectionId = binding?.broker_connection_id ?? null;
+      if (!connectionId) return result("dhan", "OFFLINE", started, "No Dhan connection is bound to this account.");
     }
-    const detail = priorResult.includes("authentication failed")
-      ? "Broker authentication failed."
-      : priorResult.includes("invalid credentials")
-        ? "Broker authentication failed."
-        : row.last_tested_at
-          ? row.is_active === true
-            ? "Most recent Dhan authentication test failed."
-            : "Dhan credential is inactive; its latest authentication test failed."
-          : "Dhan has not passed an authentication test.";
+
+    let query = db
+      .from("broker_connections")
+      .select("is_active,is_connected,connection_status,last_tested_at,last_test_result")
+      .eq("broker_id", "dhan")
+      .eq("environment", "production");
+    query = connectionId
+      ? query.eq("id", connectionId)
+      : query.eq("is_active", true);
+    const { data: row, error } = await query.maybeSingle();
+    if (error) return result("dhan", "ERROR", started, "Dhan credential status is unavailable.");
+    if (!row) return result("dhan", "OFFLINE", started, "No active FundedWealth Dhan connection is configured.");
+    if (row.is_active === true && row.is_connected === true && row.connection_status === "connected") {
+      return result("dhan", "ONLINE", started, "Most recent Dhan authentication test succeeded.");
+    }
+    const detail = row.last_tested_at
+      ? "Most recent Dhan authentication test failed."
+      : "Dhan has not passed an authentication test.";
     return result("dhan", row.last_tested_at ? "ERROR" : "OFFLINE", started, detail);
   } catch {
     return result("dhan", "ERROR", started, "Dhan credential status is unavailable.");

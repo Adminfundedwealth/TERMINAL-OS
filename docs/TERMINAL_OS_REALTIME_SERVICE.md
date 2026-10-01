@@ -14,10 +14,10 @@ The persistent service owns upstream Dhan/Kite socket connections, provider prot
 2. Terminal OS validates the customer and selected account using the existing account-context authorization. A ticket is bound to the customer, account, provider, environment, expiry, and one-time nonce. It contains no broker credential.
 3. Main Terminal opens `wss://<persistent-service>/ws` and sends the ticket in the first `connection/authenticate` message. Do not place tickets or user tokens in the URL or logs.
 4. The persistent service validates the ticket and rechecks the account context before accepting subscriptions.
-5. For every subscription, validate account ownership/activity again and call the server-only `authorizeRealtimeMarketDataSubscription` helper. It loads only the existing `broker_credentials` row matching account, provider, environment, and `is_active=true`. The returned credential map is service-internal and must never enter any message or log.
+5. For every subscription, validate account ownership/activity again and call the server-only `authorizeRealtimeMarketDataSubscription` helper. It resolves the active `trading_account_broker_connections` binding, then loads only the central `broker_credentials` row matching provider, environment, and `is_active=true`. The returned credential map is service-internal and must never enter any message or log.
 6. Validate each requested instrument against the selected provider. Never switch provider/account credentials when a subscription fails.
 
-The helper `authorizeRealtimeMarketDataSubscription` is implemented server-side for the future service. The ticket endpoint, persistent socket process, and deployment wiring are not implemented in this change.
+The helper `authorizeRealtimeMarketDataSubscription` and central binding migration are implemented server-side. The ticket endpoint, persistent socket process, and deployment wiring are not implemented in this change.
 
 ## Message Contract
 

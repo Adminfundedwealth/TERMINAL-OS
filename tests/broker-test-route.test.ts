@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getBrokerCredentialTestTarget: vi.fn(),
-  testBrokerConnection: vi.fn(),
+  getCentralBrokerConnectionTestTarget: vi.fn(),
+  testCentralBrokerConnection: vi.fn(),
   writeActivityLog: vi.fn(),
 }));
 
@@ -11,8 +11,12 @@ vi.mock("@/lib/auth/api-handler", () => ({
   handleApiError: (error: unknown) => new Response(JSON.stringify({ error: { message: error instanceof Error ? error.message : "error" } }), { status: 500 }),
 }));
 vi.mock("@/server/services/broker-credentials", () => ({
-  getBrokerCredentialTestTarget: mocks.getBrokerCredentialTestTarget,
-  testBrokerConnection: mocks.testBrokerConnection,
+  getCentralBrokerConnectionTestTarget: mocks.getCentralBrokerConnectionTestTarget,
+  testCentralBrokerConnection: mocks.testCentralBrokerConnection,
+}));
+vi.mock("@/server/services/broker-connections", () => ({
+  getCentralBrokerConnectionTestTarget: mocks.getCentralBrokerConnectionTestTarget,
+  testCentralBrokerConnection: mocks.testCentralBrokerConnection,
 }));
 vi.mock("@/lib/logger", () => ({ writeActivityLog: mocks.writeActivityLog }));
 
@@ -20,7 +24,6 @@ import { POST } from "../app/api/terminal/broker/[id]/test/route";
 
 const credential = {
   id: "credential-1",
-  trading_account_id: "11111111-1111-4111-8111-111111111111",
   broker_id: "dhan",
   environment: "production",
   label: "Dhan",
@@ -40,39 +43,37 @@ function post(req: Request) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getBrokerCredentialTestTarget.mockResolvedValue(credential.id);
-  mocks.testBrokerConnection.mockResolvedValue({ success: false, implemented: true, message: "Broker authentication failed." });
+  mocks.getCentralBrokerConnectionTestTarget.mockResolvedValue(credential.id);
+  mocks.testCentralBrokerConnection.mockResolvedValue({ success: false, implemented: true, message: "Broker authentication failed." });
 });
 
 describe("scoped broker connection test route", () => {
   it.each([
-    { trading_account_id: "22222222-2222-4222-8222-222222222222", broker_id: "dhan", environment: "production" },
-    { trading_account_id: credential.trading_account_id, broker_id: "zerodha", environment: "production" },
-    { trading_account_id: credential.trading_account_id, broker_id: "dhan", environment: "paper" },
+    { broker_id: "dhan", environment: "production" },
+    { broker_id: "zerodha", environment: "production" },
+    { broker_id: "dhan", environment: "paper" },
   ])("rejects an out-of-scope credential before decryption/testing", async (scope) => {
-    mocks.getBrokerCredentialTestTarget.mockResolvedValueOnce(null);
+    mocks.getCentralBrokerConnectionTestTarget.mockResolvedValueOnce(null);
     const response = await post(request(scope));
 
     expect(response.status).toBe(404);
-    expect(mocks.getBrokerCredentialTestTarget).toHaveBeenCalledWith("credential-1", scope);
-    expect(mocks.testBrokerConnection).not.toHaveBeenCalled();
+    expect(mocks.getCentralBrokerConnectionTestTarget).toHaveBeenCalledWith("credential-1", scope);
+    expect(mocks.testCentralBrokerConnection).not.toHaveBeenCalled();
     expect(mocks.writeActivityLog).not.toHaveBeenCalled();
   });
 
   it("tests only the matching scope and returns no credential values", async () => {
     const response = await post(request({
-      trading_account_id: credential.trading_account_id,
       broker_id: "dhan",
       environment: "production",
     }));
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(mocks.testBrokerConnection).toHaveBeenCalledWith("credential-1", {
-      trading_account_id: credential.trading_account_id,
+    expect(mocks.testCentralBrokerConnection).toHaveBeenCalledWith("credential-1", {
       broker_id: "dhan",
       environment: "production",
-    });
+    }, "employee-1");
     expect(body.data).toMatchObject({ success: false, broker_id: "dhan", message: "Broker authentication failed." });
     expect(JSON.stringify(body)).not.toContain("encrypted_credentials");
     expect(mocks.writeActivityLog).toHaveBeenCalledWith(expect.objectContaining({

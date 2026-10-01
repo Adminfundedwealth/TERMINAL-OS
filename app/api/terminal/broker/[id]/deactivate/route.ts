@@ -1,11 +1,14 @@
 /**
- * POST /api/terminal/broker/[id]/activate
- * Activates a tested FundedWealth broker connection for gateway use.
+ * POST /api/terminal/broker/[id]/deactivate
+ * Deactivates a FundedWealth broker connection without deleting it.
  */
 import { NextResponse } from "next/server";
 import { withAuth, handleApiError } from "@/lib/auth/api-handler";
 import { PERMISSIONS } from "@/lib/rbac/permissions";
-import { activateCentralBrokerConnection, getCentralBrokerConnectionById } from "@/server/services/broker-connections";
+import {
+  deactivateCentralBrokerConnection,
+  getCentralBrokerConnectionById,
+} from "@/server/services/broker-connections";
 import { writeActivityLog } from "@/lib/logger";
 
 function getId(req: Request): string {
@@ -17,19 +20,17 @@ export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }
   try {
     const id = getId(req);
     const record = await getCentralBrokerConnectionById(id);
-
     if (!record) {
       return NextResponse.json(
-        { error: { code: "NOT_FOUND", message: "Credential not found." } },
+        { error: { code: "NOT_FOUND", message: "Broker connection not found." } },
         { status: 404 }
       );
     }
 
-    await activateCentralBrokerConnection(id, employee.id);
-
+    await deactivateCentralBrokerConnection(id, employee.id);
     await writeActivityLog({
       employee_id: employee.id,
-      action: "BROKER_SET_ACTIVE",
+      action: "BROKER_CONNECTION_DEACTIVATED",
       module: "broker",
       resource: "broker_connections",
       resource_id: id,
@@ -37,10 +38,8 @@ export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }
       metadata: { broker_id: record.broker_id, label: record.label },
     });
 
-    return NextResponse.json({
-      data: { activated: true, broker_id: record.broker_id, label: record.label },
-    });
-  } catch (err) {
-    return handleApiError(err);
+    return NextResponse.json({ data: { deactivated: true, broker_id: record.broker_id } });
+  } catch (error) {
+    return handleApiError(error);
   }
 });

@@ -39,14 +39,18 @@ describe("Terminal OS market-data health checks", () => {
 
   it("performs real NSE and TradingView requests and reports the stored Dhan failure without retrying", async () => {
     const accountQuery = createQuery({ id: "account-1", status: "active", is_active: true });
-    const credentialQuery = createQuery({
+    const bindingQuery = createQuery({ broker_connection_id: "central-connection" });
+    const connectionQuery = createQuery({
       is_active: false,
       is_connected: false,
+      connection_status: "error",
       last_tested_at: "2026-09-29T20:30:32.378Z",
       last_test_result: "Broker authentication failed.",
     });
     const db = {
-      from: vi.fn((table: string) => table === "trading_accounts" ? accountQuery : credentialQuery),
+      from: vi.fn((table: string) => table === "trading_accounts"
+        ? accountQuery
+        : table === "trading_account_broker_connections" ? bindingQuery : connectionQuery),
       rpc: vi.fn(),
     };
     vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
@@ -77,14 +81,15 @@ describe("Terminal OS market-data health checks", () => {
       ["dhan_websocket", "NOT_IMPLEMENTED"],
     ]);
     expect(health.data.find((check) => check.id === "dhan")?.detail)
-      .toBe("Broker authentication failed.");
+      .toBe("Most recent Dhan authentication test failed.");
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(fetcher.mock.calls.map(([url]) => String(url)).sort()).toEqual([
       "https://www.nseindia.com/",
       "https://www.nseindia.com/api/allIndices",
       "https://scanner.tradingview.com/india/scan",
     ].sort());
-    expect(credentialQuery.select).toHaveBeenCalledWith("is_active,is_connected,last_tested_at,last_test_result");
+    expect(bindingQuery.select).toHaveBeenCalledWith("broker_connection_id");
+    expect(connectionQuery.select).toHaveBeenCalledWith("is_active,is_connected,connection_status,last_tested_at,last_test_result");
     expect(JSON.stringify(health)).not.toContain("encrypted_credentials");
     expect(db.rpc).not.toHaveBeenCalled();
   });
@@ -103,7 +108,7 @@ describe("Terminal OS market-data health checks", () => {
 
     expect(health.data.find((check) => check.id === "nse")?.status).toBe("OFFLINE");
     expect(health.data.find((check) => check.id === "tradingview")?.status).toBe("ERROR");
-    expect(health.data.find((check) => check.id === "dhan")?.status).toBe("OFFLINE");
+    expect(health.data.find((check) => check.id === "dhan")?.status).toBe("ERROR");
     expect(health.data.find((check) => check.id === "dhan_websocket")?.status).toBe("NOT_IMPLEMENTED");
   });
 });

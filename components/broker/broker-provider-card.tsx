@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import { cn, formatDate } from "@/lib/utils";
-import type { BrokerProviderDef, BrokerCredentialRow } from "@/types/broker";
+import type { BrokerProviderDef, BrokerConnectionRow } from "@/types/broker";
 import { CredentialField } from "@/components/broker/credential-field";
 import { Button } from "@/components/ui/button";
 import {
   KeyRound,
   Pencil,
-  Trash2,
   Star,
+  PowerOff,
   FlaskConical,
   Loader2,
   ExternalLink,
@@ -19,11 +19,11 @@ import {
 
 interface BrokerProviderCardProps {
   provider: BrokerProviderDef;
-  savedRow: BrokerCredentialRow | null;
+  savedRow: BrokerConnectionRow | null;
   canManage: boolean;
   onSave: (credentials: Record<string, string>, label: string) => Promise<void>;
   onUpdate: (credentials: Record<string, string>, label: string) => Promise<void>;
-  onDelete: () => Promise<void>;
+  onDeactivate: () => Promise<void>;
   onSetActive: () => Promise<void>;
   onTest: () => Promise<string>;
   showToast: (type: "success" | "error", message: string) => void;
@@ -35,7 +35,7 @@ export function BrokerProviderCard({
   canManage,
   onSave,
   onUpdate,
-  onDelete,
+  onDeactivate,
   onSetActive,
   onTest,
   showToast,
@@ -52,6 +52,7 @@ export function BrokerProviderCard({
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [activating, setActivating] = useState(false);
+  const [deactivating, setDeactivating] = useState(false);
   const [testResult, setTestResult] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
@@ -121,6 +122,17 @@ export function BrokerProviderCard({
     }
   }
 
+  async function handleDeactivate() {
+    setDeactivating(true);
+    try {
+      await onDeactivate();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Deactivation failed.");
+    } finally {
+      setDeactivating(false);
+    }
+  }
+
   const credentialCount = provider.fields.length;
 
   // CONNECTED / SAVED CARD - compact view
@@ -185,7 +197,7 @@ export function BrokerProviderCard({
             <Circle className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
           )}
           <span>
-            {credentialCount} key{credentialCount !== 1 ? "s" : ""} configured
+                {credentialCount} key{credentialCount !== 1 ? "s" : ""} configured · {savedRow.environment}
             {savedRow.created_at ? ` | Added ${formatDate(savedRow.created_at)}` : ""}
           </span>
         </div>
@@ -234,7 +246,21 @@ export function BrokerProviderCard({
                 {activating
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   : <Star className="h-3.5 w-3.5" />}
-                {activating ? "Setting..." : "Set Active"}
+                {activating ? "Activating..." : "Activate"}
+              </Button>
+            )}
+            {isActive && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5"
+                onClick={handleDeactivate}
+                disabled={deactivating}
+              >
+                {deactivating
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <PowerOff className="h-3.5 w-3.5" />}
+                {deactivating ? "Deactivating..." : "Deactivate"}
               </Button>
             )}
             <Button
@@ -245,14 +271,6 @@ export function BrokerProviderCard({
             >
               <Pencil className="h-3.5 w-3.5" />
               Edit
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10 ml-auto"
-              onClick={onDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
         )}

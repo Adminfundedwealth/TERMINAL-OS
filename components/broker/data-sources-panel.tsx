@@ -28,16 +28,16 @@ const STATUS_STYLE: Record<SourceStatus, { color: string; dot: string }> = {
   NOT_IMPLEMENTED: { color: "text-amber-400", dot: "bg-amber-500" },
 };
 
-export function DataSourcesPanel({ accountId }: { accountId: string }) {
+export function DataSourcesPanel() {
+  const accountId = "";
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
-    queryKey: ["market-data-health", accountId],
+    queryKey: ["market-data-health", "central"],
     queryFn: async () => {
-      const query = new URLSearchParams({ account_id: accountId });
-      const response = await fetch(`/api/terminal/market-data/health?${query}`, { cache: "no-store" });
+      const response = await fetch("/api/terminal/market-data/health", { cache: "no-store" });
       if (!response.ok) throw new Error("Market-data health request failed.");
       return response.json() as Promise<{ data: DataSourceHealth[] }>;
     },
-    enabled: Boolean(accountId),
+    enabled: true,
     retry: false,
     refetchInterval: 30_000,
   });
@@ -99,7 +99,6 @@ export function DataSourcesPanel({ accountId }: { accountId: string }) {
           </div>
         ))}
       </div>
-      {!accountId && <p className="px-4 py-2 text-xs text-muted-foreground">Select an active trading account to inspect Dhan status.</p>}
       {isLoading && <p className="px-4 py-2 text-xs text-muted-foreground">Checking service health…</p>}
       {isError && <p className="px-4 py-2 text-xs text-red-400">Health checks could not be loaded.</p>}
     </div>

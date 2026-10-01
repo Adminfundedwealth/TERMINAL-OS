@@ -144,37 +144,37 @@ describe("encrypted broker credential integration", () => {
     expect(response[0]).not.toHaveProperty("encrypted_credentials");
   });
 
-  it("selects only active credentials scoped to the requested account and broker", async () => {
+  it("reuses one central connection through separate active account bindings", async () => {
     process.env.BROKER_ENCRYPTION_KEY = "unit-test-only-encryption-key-32-bytes";
-    const { db, brokerFilters, credentialFilters, query } = createDatabaseMock();
+    const filters: Array<[string, unknown]> = [];
+    const query: Record<string, any> = {};
+    query.select = vi.fn(() => query);
+    query.eq = vi.fn((column: string, value: unknown) => { filters.push([column, value]); return query; });
+    query.is = vi.fn((column: string, value: unknown) => { filters.push([column, value]); return query; });
+    const bindingResults = [
+      { data: { broker_connection_id: "central-connection" }, error: null },
+      { data: { encrypted_credentials: encryptedValue }, error: null },
+      { data: { broker_connection_id: "central-connection" }, error: null },
+      { data: { encrypted_credentials: encryptedValue }, error: null },
+      { data: { broker_connection_id: "central-connection" }, error: null },
+      { data: { encrypted_credentials: encryptedValue }, error: null },
+    ];
+    query.maybeSingle = vi.fn(async () => bindingResults.shift() ?? { data: null, error: null });
+    const db = { from: vi.fn(() => query), rpc: vi.fn(async () => ({ data: JSON.stringify(secretCredentials), error: null })) };
     vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
 
     await getMarketDataCredentials("dhan-account-1", "dhan");
-    await getMarketDataCredentials("dhan-account-2", "dhan", "paper");
-    await getMarketDataCredentials("kite-account-1", "kite");
-    await getMarketDataCredentials("kite-account-2", "kite", "sandbox");
+    await getMarketDataCredentials("dhan-account-2", "dhan");
+    await getMarketDataCredentials("dhan-account-3", "dhan");
 
-    expect(brokerFilters).toEqual(["dhan", "dhan", "zerodha", "zerodha"]);
-    expect(credentialFilters).toEqual([
-      ["broker_id", "dhan"],
-      ["trading_account_id", "dhan-account-1"],
-      ["environment", "production"],
-      ["is_active", true],
-      ["broker_id", "dhan"],
-      ["trading_account_id", "dhan-account-2"],
-      ["environment", "paper"],
-      ["is_active", true],
-      ["broker_id", "zerodha"],
-      ["trading_account_id", "kite-account-1"],
-      ["environment", "production"],
-      ["is_active", true],
-      ["broker_id", "zerodha"],
-      ["trading_account_id", "kite-account-2"],
-      ["environment", "sandbox"],
-      ["is_active", true],
-    ]);
-    expect(query.order).not.toHaveBeenCalled();
-    expect(db.rpc).toHaveBeenCalledTimes(4);
+    expect(filters).toContainEqual(["trading_account_id", "dhan-account-1"]);
+    expect(filters).toContainEqual(["trading_account_id", "dhan-account-2"]);
+    expect(filters).toContainEqual(["trading_account_id", "dhan-account-3"]);
+    expect(filters).toContainEqual(["id", "central-connection"]);
+    expect(filters).toContainEqual(["broker_id", "dhan"]);
+    expect(filters).toContainEqual(["environment", "production"]);
+    expect(filters).toContainEqual(["is_active", true]);
+    expect(db.rpc).toHaveBeenCalledTimes(3);
     expect(db.rpc).toHaveBeenCalledWith("decrypt_broker_credentials", expect.objectContaining({
       ciphertext: encryptedValue,
       passphrase: "unit-test-only-encryption-key-32-bytes",
@@ -189,6 +189,10 @@ describe("encrypted broker credential integration", () => {
       filters.push([column, value]);
       return query;
     });
+    query.is = vi.fn((column: string, value: unknown) => {
+      filters.push([column, value]);
+      return query;
+    });
     query.maybeSingle = vi.fn(async () => ({ data: null, error: null }));
     const db = { from: vi.fn(() => query), rpc: vi.fn() };
     vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
@@ -198,9 +202,7 @@ describe("encrypted broker credential integration", () => {
 
     expect(error).toMatchObject({ code: "MISSING_CREDENTIALS" });
     expect(filters).toEqual([
-      ["broker_id", "zerodha"],
       ["trading_account_id", "dhan-account-1"],
-      ["environment", "production"],
       ["is_active", true],
     ]);
     expect(db.rpc).not.toHaveBeenCalled();
@@ -211,6 +213,10 @@ describe("encrypted broker credential integration", () => {
     const query: Record<string, (...args: any[]) => any> = {};
     query.select = vi.fn(() => query);
     query.eq = vi.fn((column: string, value: unknown) => {
+      filters.push([column, value]);
+      return query;
+    });
+    query.is = vi.fn((column: string, value: unknown) => {
       filters.push([column, value]);
       return query;
     });
@@ -227,9 +233,9 @@ describe("encrypted broker credential integration", () => {
     expect(result).toMatchObject({ success: false, implemented: false });
     expect(filters).toEqual([
       ["id", "credential-1"],
-      ["trading_account_id", "account-1"],
       ["broker_id", "dhan"],
       ["environment", "production"],
+      ["trading_account_id", "account-1"],
     ]);
     expect(db.rpc).not.toHaveBeenCalled();
   });
@@ -243,22 +249,25 @@ describe("encrypted broker credential integration", () => {
 
   it("does not expose free-form stored provider status text", async () => {
     const privateStatus = "upstream rejected token private-access-secret";
-    const query = {
+    const query: Record<string, any> = {
       select: vi.fn(() => query),
       eq: vi.fn(() => query),
-      maybeSingle: vi.fn(async () => ({
-        data: { is_connected: false, last_tested_at: "2026-09-29T00:00:00.000Z", last_test_result: privateStatus },
-        error: null,
-      })),
+      is: vi.fn(() => query),
+      maybeSingle: vi.fn()
+        .mockResolvedValueOnce({ data: { broker_connection_id: "central-connection" }, error: null })
+        .mockResolvedValueOnce({ data: { is_connected: false, last_tested_at: "2026-09-29T00:00:00.000Z", last_test_result: privateStatus }, error: null }),
     };
     const db = { from: vi.fn(() => query) };
     vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
 
     const status = await getMarketDataCredentialStatus("account-1", "dhan", "paper");
 
+    expect(db.from).toHaveBeenNthCalledWith(1, "trading_account_broker_connections");
+    expect(db.from).toHaveBeenNthCalledWith(2, "broker_connections");
     expect(status.last_test_result).toBe("Authentication failed.");
     expect(JSON.stringify(status)).not.toContain("private-access-secret");
     expect(query.eq).toHaveBeenCalledWith("environment", "paper");
+    expect(query.eq).toHaveBeenCalledWith("id", "central-connection");
   });
 
   it("fails safely when no active credential exists for the requested environment", async () => {
@@ -266,6 +275,7 @@ describe("encrypted broker credential integration", () => {
     query.eq = vi.fn(() => query);
     query.select = vi.fn(() => query);
     query.maybeSingle = vi.fn(async () => ({ data: null, error: null }));
+    query.is = vi.fn(() => query);
     const db = { from: vi.fn(() => query) };
     vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
 
@@ -273,8 +283,8 @@ describe("encrypted broker credential integration", () => {
       .catch((failure: unknown) => failure);
 
     expect(error).toMatchObject({ code: "MISSING_CREDENTIALS" });
-    expect(query.eq).toHaveBeenCalledWith("environment", "paper");
     expect(query.eq).toHaveBeenCalledWith("is_active", true);
+    expect(query.eq).toHaveBeenCalledWith("trading_account_id", "account-1");
     expect((error as Error).message).not.toContain("access_token");
   });
 

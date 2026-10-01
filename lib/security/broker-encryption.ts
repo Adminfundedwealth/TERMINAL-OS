@@ -48,14 +48,8 @@ export async function encryptCredentials(
   });
 
   if (error || !data) {
-    // Fallback: base64 encode with a marker so we know it's not encrypted
-    // In dev mode without pgcrypto we store it marked as dev-only
-    if (process.env.DEV_MODE === "true") {
-      return `DEV_UNENCRYPTED:${Buffer.from(plaintext).toString("base64")}`;
-    }
     throw new Error(
-      `[Terminal OS] Failed to encrypt broker credentials: ${error?.message}. ` +
-        "Ensure pgcrypto is enabled and the encrypt_broker_credentials RPC function exists."
+      "[Terminal OS] Failed to encrypt broker credentials. Ensure pgcrypto and its encryption RPC are configured."
     );
   }
 
@@ -74,12 +68,6 @@ export async function decryptCredentials(
     throw new Error("[Terminal OS] BROKER_ENCRYPTION_KEY is not configured.");
   }
 
-  // Handle dev mode unencrypted fallback
-  if (encrypted.startsWith("DEV_UNENCRYPTED:")) {
-    const b64 = encrypted.replace("DEV_UNENCRYPTED:", "");
-    return JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
-  }
-
   const db = createServerSupabaseClient();
   const { data, error } = await db.rpc("decrypt_broker_credentials", {
     ciphertext: encrypted,
@@ -87,9 +75,7 @@ export async function decryptCredentials(
   });
 
   if (error || !data) {
-    throw new Error(
-      `[Terminal OS] Failed to decrypt broker credentials: ${error?.message}`
-    );
+    throw new Error("[Terminal OS] Failed to decrypt broker credentials.");
   }
 
   return JSON.parse(data as string) as BrokerCredentialMap;
