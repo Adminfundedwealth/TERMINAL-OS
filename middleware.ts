@@ -11,11 +11,15 @@ const LOCAL_TRADER_ORIGINS = new Set([
 function applyApiCors(request: NextRequest, response: NextResponse): NextResponse {
   const origin = request.headers.get("origin");
   if (!origin) return response;
-  const isMarketDataRoute = request.nextUrl.pathname === "/api/terminal/market-data";
-  const configuredMarketDataOrigins = isMarketDataRoute
+  const isCustomerDataRoute = [
+    "/api/terminal/market-data",
+    "/api/terminal/market-data/stream",
+    "/api/terminal/orders",
+  ].includes(request.nextUrl.pathname);
+  const configuredCustomerOrigins = isCustomerDataRoute
     ? (process.env.MAIN_TERMINAL_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean)
     : [];
-  if (!LOCAL_TRADER_ORIGINS.has(origin) && !configuredMarketDataOrigins.includes(origin)) return response;
+  if (!LOCAL_TRADER_ORIGINS.has(origin) && !configuredCustomerOrigins.includes(origin)) return response;
 
   response.headers.set("Access-Control-Allow-Origin", origin);
   response.headers.set("Access-Control-Allow-Credentials", "true");

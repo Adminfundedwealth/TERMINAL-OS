@@ -1,6 +1,6 @@
 /**
- * GET  /api/terminal/broker  — list FundedWealth connections (masked)
- * POST /api/terminal/broker  — create a FundedWealth connection
+ * GET  /api/terminal/broker  — list all saved broker credentials (masked)
+ * POST /api/terminal/broker  — save new broker credentials
  *
  * ADMIN / SUPER_ADMIN only.
  * Raw credentials are NEVER returned. All secrets are masked.
@@ -9,9 +9,9 @@ import { NextResponse } from "next/server";
 import { withAuth, handleApiError } from "@/lib/auth/api-handler";
 import { PERMISSIONS } from "@/lib/rbac/permissions";
 import {
-  getCentralBrokerConnections,
-  createCentralBrokerConnection,
-} from "@/server/services/broker-connections";
+  getAllBrokerCredentials,
+  createBrokerCredential,
+} from "@/server/services/broker-credentials";
 import { writeActivityLog, serverLog } from "@/lib/logger";
 import { BROKER_PROVIDERS } from "@/lib/brokers/provider-definitions";
 import { z } from "zod";
@@ -20,15 +20,20 @@ import type { BrokerId } from "@/types/broker";
 const VALID_BROKER_IDS = BROKER_PROVIDERS.map((p) => p.id) as [BrokerId, ...BrokerId[]];
 
 const SaveSchema = z.object({
+  trading_account_id: z.string().uuid().optional(),
   broker_id: z.enum(VALID_BROKER_IDS),
   label: z.string().max(64).optional(),
   credentials: z.record(z.string(), z.string()),
   environment: z.enum(["production", "paper", "sandbox"]).optional(),
+}).superRefine((data, context) => {
+  if ((data.broker_id === "dhan" || data.broker_id === "zerodha") && !data.trading_account_id) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["trading_account_id"], message: "An account is required for market-data credentials." });
+  }
 });
 
 export const GET = withAuth(PERMISSIONS.BROKER_VIEW, async ({ employee }) => {
   try {
-    const rows = await getCentralBrokerConnections();
+    const rows = await getAllBrokerCredentials();
     // Attach provider metadata (name, capabilities etc.) client needs for display
     const enriched = rows.map((row) => {
       const provider = BROKER_PROVIDERS.find((p) => p.id === row.broker_id);
@@ -57,20 +62,17 @@ export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }
       );
     }
 
-    const record = await createCentralBrokerConnection({
-      broker_id: parsed.data.broker_id,
-      environment: parsed.data.environment ?? "production",
-    }, parsed.data.label ?? "Default", parsed.data.credentials, employee.id);
+    const record = await createBrokerCredential(parsed.data, employee.id);
 
     // Audit log — NEVER include credential values
     await writeActivityLog({
       employee_id: employee.id,
-      action: "BROKER_CONNECTION_CREATED",
+      action: "BROKER_CREDENTIALS_CREATED",
       module: "broker",
-      resource: "broker_connections",
+      resource: "broker_credentials",
       resource_id: record.id,
       result: "SUCCESS",
-      metadata: { broker_id: parsed.data.broker_id, label: parsed.data.label, ownership: "fundedwealth_central" },
+      metadata: { broker_id: parsed.data.broker_id, label: parsed.data.label },
     });
 
     return NextResponse.json({ data: record }, { status: 201 });

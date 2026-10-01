@@ -27,4 +27,17 @@ describe("market-data CORS middleware", () => {
     expect(allowed.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
     expect(denied.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
+
+  it("permits the configured Main Terminal origin on the customer order gateway", async () => {
+    process.env.MAIN_TERMINAL_ORIGINS = "https://charts.fundedwealth.com";
+
+    const response = await middleware(new NextRequest("https://terminal.test/api/terminal/orders", {
+      method: "OPTIONS",
+      headers: { origin: "https://charts.fundedwealth.com" },
+    }));
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://charts.fundedwealth.com");
+    expect(response.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+  });
 });

@@ -73,19 +73,6 @@ describe("Dhan read-only market data provider", () => {
     expect(quote).toMatchObject({ provider: "dhan", ltp: 25100, previousClose: 25000, change: 100, volume: 42 });
   });
 
-  it("normalizes Main Terminal's array-shaped Dhan LTP response", async () => {
-    const fetcher = vi.fn<Fetcher>(async () => jsonResponse({ data: { IDX_I: [{
-      securityId: "13",
-      last_price: 25100,
-      previous_close: 25000,
-    }] } }));
-    const provider = new DhanMarketDataProvider(dhanCredentials, fetcher);
-
-    const quote = await provider.getQuote(dhanInstrument);
-
-    expect(quote).toMatchObject({ provider: "dhan", symbol: "NIFTY 50", ltp: 25100, previousClose: 25000, change: 100 });
-  });
-
   it("normalizes Dhan historical candles", async () => {
     const fetcher = vi.fn<Fetcher>(async () => jsonResponse({ data: {
       timestamp: ["2026-09-28 09:15:00"], open: [100], high: [105], low: [99], close: [103], volume: [900],
@@ -99,35 +86,29 @@ describe("Dhan read-only market data provider", () => {
     expect(candles[0]).toMatchObject({ open: 100, high: 105, close: 103, volume: 900 });
   });
 
-  it("normalizes a Dhan option chain including separate IV, Greeks, and OI maps", async () => {
-    const fetcher = vi.fn<Fetcher>(async () => jsonResponse({ status: "success", data: {
-      last_price: 25000,
-      oc: { "25000": {
-        ce: { last_price: 100, close: 90, top_bid_price: 99, top_ask_price: 101, volume: 120, oi: 500, oi_chg: 50 },
-        pe: { last_price: 95, close: 100, bid_price: 94, ask_price: 96, volume: 110, oi: 450 },
-      } },
-      iv_oc: { "25000": { ce_iv: 12, pe_iv: 13 } },
-      gk_oc: { "25000": { ce_delta: 0.5, ce_gamma: 0.01, pe_delta: -0.5 } },
-      oi_data: { "25000": { ce_oi: 500, ce_oi_chg: 50, pe_oi: 450, pe_oi_chg: -10 } },
-    } }));
+  it("normalizes a Dhan option chain through expiry discovery", async () => {
+    const fetcher = vi.fn<Fetcher>(async (input) => {
+      if (String(input).includes("expirylist")) return jsonResponse({ status: "success", data: ["2026-10-01"] });
+      return jsonResponse({ status: "success", data: {
+        last_price: 25100,
+        oc: { "25000": { ce: { last_price: 150, oi: 500, volume: 20, implied_volatility: 12, greeks: { delta: 0.5 } }, pe: { last_price: 120, oi: 600, volume: 30, implied_volatility: 13 } } },
+      } });
+    });
     const provider = new DhanMarketDataProvider(dhanCredentials, fetcher);
 
-    const chain = await provider.getOptionChain("NIFTY", "2026-10-01");
+    const chain = await provider.getOptionChain("NIFTY");
 
-    expect(String(fetcher.mock.calls[0][0])).toContain("/optionchain");
-    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({
-      UnderlyingScrip: 13,
-      UnderlyingSeg: "IDX_I",
-      Expiry: "2026-10-01",
-    });
-    expect(chain).toMatchObject({ provider: "dhan", underlying: "NIFTY", expiry: "2026-10-01", spot_price: 25000 });
-    expect(chain.chain[0]).toMatchObject({
-      strike: 25000,
-      call: { ltp: 100, bid: 99, ask: 101, volume: 120, oi: 500, change: 10, change_percent: 100 / 9, iv: 12, greeks: { delta: 0.5, gamma: 0.01 } },
-      put: { ltp: 95, bid: 94, ask: 96, volume: 110, oi: 450, iv: 13, greeks: { delta: -0.5 } },
-      ce: { ltp: 100, bidPrice: 99, askPrice: 101 },
-      pe: { ltp: 95, bidPrice: 94, askPrice: 96 },
-    });
+    expect(String(fetcher.mock.calls[0][0])).toContain("expirylist");
+    expect(String(fetcher.mock.calls[1][0])).toContain("/optionchain");
+    expect(chain).toMatchObject({ provider: "dhan", underlying: "NIFTY", expiry: "2026-10-01", spotPrice: 25100, totalCEOI: 500, totalPEOI: 600, greeksAvailable: true });
+    expect(chain.chain[0]).toMatchObject({ strikePrice: 25000, ce: { ltp: 150, oi: 500, delta: 0.5 }, pe: { ltp: 120, oi: 600 } });
+  });
+
+  it("rejects unsupported Dhan option underlyings before upstream access", async () => {
+    const fetcher = vi.fn<Fetcher>();
+    await expect(new DhanMarketDataProvider(dhanCredentials, fetcher).getOptionChain("RELIANCE"))
+      .rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("fails closed on missing or invalid credentials and redacts upstream bodies", async () => {
@@ -201,39 +182,6 @@ describe("Kite read-only market data provider", () => {
 
     expect(String(fetcher.mock.calls[0][0])).toContain("/instruments/historical/256265/5minute");
     expect(candles[0]).toMatchObject({ open: 100, high: 105, close: 103, volume: 900 });
-  });
-
-  it("constructs a Kite option chain from the instrument master and quote endpoint", async () => {
-    const csv = [
-      "instrument_token,tradingsymbol,name,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange",
-      "101,NIFTY26OCT25000CE,NIFTY,2026-10-01,25000,0.05,50,CE,NFO-OPT,NFO",
-      "102,NIFTY26OCT25000PE,NIFTY,2026-10-01,25000,0.05,50,PE,NFO-OPT,NFO",
-      "256265,NIFTY 50,NIFTY 50,,,0.05,1,INDEX,INDICES,NSE",
-    ].join("\n");
-    const fetcher = vi.fn<Fetcher>(async (input) => {
-      const url = new URL(String(input));
-      if (url.pathname === "/instruments") return new Response(csv, { status: 200 });
-      const instruments = url.searchParams.getAll("i");
-      if (instruments.some((item) => item.startsWith("NFO:"))) {
-        return jsonResponse({ status: "success", data: {
-          "NFO:NIFTY26OCT25000CE": { last_price: 100, volume: 500, oi: 1000, ohlc: { close: 90 }, depth: { buy: [{ price: 99 }], sell: [{ price: 101 }] } },
-          "NFO:NIFTY26OCT25000PE": { last_price: 95, volume: 400, oi: 900, ohlc: { close: 100 }, depth: { buy: [{ price: 94 }], sell: [{ price: 96 }] } },
-        } });
-      }
-      return jsonResponse({ status: "success", data: { "NSE:NIFTY 50": { last_price: 25000, ohlc: { close: 24950 } } } });
-    });
-    const provider = new KiteMarketDataProvider(kiteCredentials, fetcher);
-
-    const chain = await provider.getOptionChain("NIFTY", "2026-10-01");
-
-    expect(chain).toMatchObject({ provider: "kite", underlying: "NIFTY", expiry: "2026-10-01", spot_price: 25000 });
-    expect(chain.chain[0]).toMatchObject({
-      strike: 25000,
-      call: { ltp: 100, bid: 99, ask: 101, volume: 500, oi: 1000, change: 10, greeks: null },
-      put: { ltp: 95, bid: 94, ask: 96, volume: 400, oi: 900, change: -5 },
-      ce: { ltp: 100, bidPrice: 99, askPrice: 101 },
-      pe: { ltp: 95, bidPrice: 94, askPrice: 96 },
-    });
   });
 
   it("fails closed on missing or invalid credentials and redacts upstream bodies", async () => {

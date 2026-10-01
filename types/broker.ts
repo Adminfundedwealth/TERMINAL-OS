@@ -69,10 +69,9 @@ export interface BrokerCredentialRow {
   updated_by: string | null;
   created_at: string;
   updated_at: string;
-  connection_status?: "untested" | "connected" | "error";
-  health_metadata?: Record<string, unknown>;
 }
 
+/** FundedWealth-owned central connection metadata; encrypted values are never exposed. */
 export interface BrokerConnectionRow {
   id: string;
   broker_id: BrokerId;
@@ -80,11 +79,11 @@ export interface BrokerConnectionRow {
   masked_credentials: Record<string, string>;
   is_active: boolean;
   is_connected: boolean;
-  connection_status: "untested" | "connected" | "error";
-  health_metadata: Record<string, unknown>;
   last_tested_at: string | null;
   last_test_result: string | null;
-  environment: "production" | "paper" | "sandbox";
+  environment: string;
+  connection_status?: "untested" | "connected" | "error";
+  health_metadata?: Record<string, unknown>;
   created_by: string | null;
   updated_by: string | null;
   created_at: string;

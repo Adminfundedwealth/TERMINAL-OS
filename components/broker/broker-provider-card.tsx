@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cn, formatDate } from "@/lib/utils";
-import type { BrokerProviderDef, BrokerConnectionRow } from "@/types/broker";
+import type { BrokerProviderDef, BrokerConnectionRow, BrokerCredentialRow } from "@/types/broker";
 import { CredentialField } from "@/components/broker/credential-field";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,13 +19,14 @@ import {
 
 interface BrokerProviderCardProps {
   provider: BrokerProviderDef;
-  savedRow: BrokerConnectionRow | null;
+  savedRow: BrokerConnectionRow | BrokerCredentialRow | null;
   canManage: boolean;
   onSave: (credentials: Record<string, string>, label: string) => Promise<void>;
   onUpdate: (credentials: Record<string, string>, label: string) => Promise<void>;
-  onDeactivate: () => Promise<void>;
+  onDeactivate?: () => Promise<void>;
   onSetActive: () => Promise<void>;
   onTest: () => Promise<string>;
+  onDelete?: () => Promise<void>;
   showToast: (type: "success" | "error", message: string) => void;
 }
 
@@ -38,6 +39,7 @@ export function BrokerProviderCard({
   onDeactivate,
   onSetActive,
   onTest,
+  onDelete: _onDelete,
   showToast,
 }: BrokerProviderCardProps) {
   const isSaved = savedRow !== null;
@@ -125,7 +127,7 @@ export function BrokerProviderCard({
   async function handleDeactivate() {
     setDeactivating(true);
     try {
-      await onDeactivate();
+      await onDeactivate?.();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Deactivation failed.");
     } finally {

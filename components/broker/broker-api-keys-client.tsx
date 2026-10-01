@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { BrokerSecurityNotice } from "@/components/broker/broker-security-notice";
 import { DataSourcesPanel } from "@/components/broker/data-sources-panel";
 import { MarketDatabasePanel } from "@/components/broker/market-database-panel";
@@ -9,27 +8,33 @@ import { ChartDataDownloader } from "@/components/broker/chart-data-downloader";
 import { BrokerProviderCard } from "@/components/broker/broker-provider-card";
 import { HowItWorksSection } from "@/components/broker/how-it-works-section";
 import { BROKER_PROVIDERS } from "@/lib/brokers/provider-definitions";
-import type { BrokerConnectionRow, BrokerProviderDef } from "@/types/broker";
+import type { BrokerCredentialRow, BrokerProviderDef } from "@/types/broker";
 import { AlertCircle, Loader2, CheckCircle2 } from "lucide-react";
 
 type TabId = "connected" | "available";
-type BrokerEnvironment = "production" | "paper" | "sandbox";
 
 interface BrokerApiKeysClientProps {
   canManage: boolean;
 }
 
-interface EnrichedRow extends BrokerConnectionRow {
+interface EnrichedRow extends BrokerCredentialRow {
   provider_name: string;
   capabilities: string[];
   runtime_integrated: boolean;
 }
 
+interface AccountOption {
+  id: string;
+  account_code: string;
+  status: string;
+  broker_provider: string;
+}
+
 export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
-  const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabId>("available");
-  const [environment, setEnvironment] = useState<BrokerEnvironment>("production");
   const [savedRows, setSavedRows] = useState<EnrichedRow[]>([]);
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState("");
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{
     type: "success" | "error";
@@ -59,14 +64,37 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
     }
   }, []);
 
-  useEffect(() => { void fetchSaved(); }, [fetchSaved]);
+  const fetchAccounts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/terminal/accounts?status=active&page_size=100");
+      if (!res.ok) { setAccounts([]); return; }
+      const { data } = await res.json();
+      const rows = (data ?? []) as AccountOption[];
+      setAccounts(rows);
+      setSelectedAccountId((current) => rows.some((row) => row.id === current) ? current : rows[0]?.id ?? "");
+    } catch {
+      setAccounts([]);
+      setSelectedAccountId("");
+    }
+  }, []);
 
-  const visibleRows = savedRows.filter((row) => row.environment === environment);
+  useEffect(() => { void fetchSaved(); void fetchAccounts(); }, [fetchAccounts, fetchSaved]);
+
+  const isAccountScopedProvider = (providerId: string) => providerId === "dhan" || providerId === "zerodha";
+  const visibleRows = savedRows.filter((row) =>
+    !isAccountScopedProvider(row.broker_id) || row.trading_account_id === selectedAccountId
+  );
   const savedByBrokerId = new Map(visibleRows.map((r) => [r.broker_id, r]));
   const connectedProviders = BROKER_PROVIDERS.filter((p) => savedByBrokerId.has(p.id));
   const availableProviders = BROKER_PROVIDERS.filter((p) => !savedByBrokerId.has(p.id));
+  const unassignedMarketCredentialCount = savedRows.filter((row) =>
+    isAccountScopedProvider(row.broker_id) && !row.trading_account_id
+  ).length;
 
   async function handleSave(provider: BrokerProviderDef, credentials: Record<string, string>, label: string) {
+    if (isAccountScopedProvider(provider.id) && !selectedAccountId) {
+      throw new Error("Select an active trading account before saving Dhan or Kite credentials.");
+    }
     const res = await fetch("/api/terminal/broker", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -74,7 +102,7 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
         broker_id: provider.id,
         label,
         credentials,
-        environment,
+        ...(isAccountScopedProvider(provider.id) ? { trading_account_id: selectedAccountId } : {}),
       }),
     });
     const j = await res.json();
@@ -88,7 +116,7 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
     const res = await fetch(`/api/terminal/broker/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credentials, label, environment }),
+      body: JSON.stringify({ credentials, label }),
     });
     const j = await res.json();
     if (!res.ok) throw new Error(j?.error?.message ?? "Update failed.");
@@ -96,11 +124,12 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
     await fetchSaved();
   }
 
-  async function handleDeactivate(id: string, provider: BrokerProviderDef) {
-    const res = await fetch(`/api/terminal/broker/${id}/deactivate`, { method: "POST" });
+  async function handleDelete(id: string, provider: BrokerProviderDef) {
+    if (!confirm(`Delete ${provider.name} credentials? This cannot be undone.`)) return;
+    const res = await fetch(`/api/terminal/broker/${id}`, { method: "DELETE" });
     const j = await res.json();
-    if (!res.ok) throw new Error(j?.error?.message ?? "Deactivation failed.");
-    showToast("success", `${provider.name} deactivated.`);
+    if (!res.ok) throw new Error(j?.error?.message ?? "Delete failed.");
+    showToast("success", `${provider.name} credentials deleted.`);
     await fetchSaved();
   }
 
@@ -112,24 +141,14 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
     await fetchSaved();
   }
 
-  async function handleTest(id: string, provider: BrokerProviderDef, targetEnvironment: BrokerEnvironment): Promise<string> {
-    const res = await fetch(`/api/terminal/broker/${id}/test`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        broker_id: provider.id,
-        environment: targetEnvironment,
-      }),
-    });
+  async function handleTest(id: string, _provider: BrokerProviderDef): Promise<string> {
+    const res = await fetch(`/api/terminal/broker/${id}/test`, { method: "POST" });
     const j = await res.json();
     if (!res.ok) throw new Error(j?.error?.message ?? "Test failed.");
     const result = j.data as { success: boolean; message: string; implemented: boolean };
-    await Promise.all([
-      fetchSaved(),
-      queryClient.invalidateQueries({ queryKey: ["market-data-health"] }),
-    ]);
     if (!result.implemented) return `Not implemented: ${result.message}`;
     if (!result.success) throw new Error(result.message);
+    await fetchSaved();
     return result.message;
   }
 
@@ -152,27 +171,36 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
       )}
 
       <div>
-        <h1 className="text-xl font-semibold text-foreground">FundedWealth Broker Connections</h1>
+        <h1 className="text-xl font-semibold text-foreground">Broker API Settings</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Configure centrally managed broker connections used by authorized FundedWealth trading accounts. Credentials are stored securely on the server.
+          Connect your broker accounts for live market data and trading. Keys are stored securely on the server.
         </p>
       </div>
 
-      <label className="flex w-fit items-center gap-3 text-sm text-muted-foreground">
-        Environment
+      {/* Security Notice */}
+      <BrokerSecurityNotice />
+
+      <label className="block max-w-lg space-y-1.5 text-sm">
+        <span className="font-medium text-foreground">Trading account for Dhan/Kite credentials</span>
         <select
-          className="h-9 rounded-md border border-border bg-background px-3 text-foreground"
-          value={environment}
-          onChange={(event) => setEnvironment(event.target.value as BrokerEnvironment)}
+          value={selectedAccountId}
+          onChange={(event) => setSelectedAccountId(event.target.value)}
+          className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
         >
-          <option value="production">Production</option>
-          <option value="paper">Paper</option>
-          <option value="sandbox">Sandbox</option>
+          <option value="">Select an active account</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.account_code || account.id} · {account.broker_provider}
+            </option>
+          ))}
         </select>
       </label>
 
-      {/* Security Notice */}
-      <BrokerSecurityNotice />
+      {unassignedMarketCredentialCount > 0 && (
+        <div role="status" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-200">
+          {unassignedMarketCredentialCount} legacy Dhan/Kite credential row(s) are unassigned and unavailable to customer market-data requests. Add credentials for a specific active account; legacy rows were not reassigned.
+        </div>
+      )}
 
       {/* Connection Status - individual service rows with Test button */}
       <DataSourcesPanel />
@@ -230,9 +258,9 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
                       canManage={canManage}
                       onSave={(c, l) => handleSave(provider, c, l)}
                       onUpdate={(c, l) => handleUpdate(row.id, provider, c, l)}
-                      onDeactivate={() => handleDeactivate(row.id, provider)}
+                      onDelete={() => handleDelete(row.id, provider)}
                       onSetActive={() => handleSetActive(row.id, provider)}
-                      onTest={() => handleTest(row.id, provider, environment)}
+                      onTest={() => handleTest(row.id, provider)}
                       showToast={showToast}
                     />
                   );
@@ -257,7 +285,7 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
                     canManage={canManage}
                     onSave={(c, l) => handleSave(provider, c, l)}
                     onUpdate={async () => {}}
-                    onDeactivate={async () => {}}
+                    onDelete={async () => {}}
                     onSetActive={async () => {}}
                     onTest={async () => ""}
                     showToast={showToast}

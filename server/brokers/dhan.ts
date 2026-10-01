@@ -31,7 +31,6 @@ function credential(credentials: BrokerCredentialMap, ...keys: string[]): string
 }
 
 function numeric(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -82,10 +81,7 @@ export class DhanMarketDataProvider implements MarketDataProvider {
       cache: "no-store",
     });
     const payload = await this.readJson(response);
-    const segmentQuotes = payload.data?.[instrument.exchangeSegment];
-    const quote = Array.isArray(segmentQuotes)
-      ? segmentQuotes.find((item: Record<string, unknown>) => String(item.securityId) === instrument.providerInstrumentId) ?? segmentQuotes[0]
-      : segmentQuotes?.[instrument.providerInstrumentId] ?? segmentQuotes;
+    const quote = payload.data?.[instrument.exchangeSegment]?.[instrument.providerInstrumentId];
     if (!quote) throw new MarketDataProviderError("dhan", "INVALID_INSTRUMENT", response.status);
 
     const ltp = requireValue(numeric(quote.last_price), "dhan");
@@ -98,8 +94,6 @@ export class DhanMarketDataProvider implements MarketDataProvider {
       tradingSymbol: instrument.tradingSymbol,
       exchange: instrument.exchange,
       ltp,
-      bid: numeric(quote.bid ?? quote.bid_price ?? quote.best_bid_price),
-      ask: numeric(quote.ask ?? quote.ask_price ?? quote.best_ask_price),
       open: numeric(ohlc.open),
       high: numeric(ohlc.high),
       low: numeric(ohlc.low),
@@ -165,31 +159,23 @@ export class DhanMarketDataProvider implements MarketDataProvider {
     let expiries = expiry ? [expiry] : [];
     if (!expiry) {
       const expiryResponse = await this.fetcher(`${DHAN_API}/optionchain/expirylist`, {
-        method: "POST",
-        headers: { ...this.headers(), "Content-Type": "application/json" },
-        body: JSON.stringify({ UnderlyingScrip: underlyingScrip, UnderlyingSeg: "NSE_FNO" }),
-        cache: "no-store",
+        method: "POST", headers: { ...this.headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ UnderlyingScrip: underlyingScrip, UnderlyingSeg: "NSE_FNO" }), cache: "no-store",
       });
       const expiryPayload = await this.readJson(expiryResponse);
-      if (expiryPayload.status !== "success" || !Array.isArray(expiryPayload.data)) {
-        throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR", expiryResponse.status);
-      }
+      if (expiryPayload.status !== "success" || !Array.isArray(expiryPayload.data)) throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR", expiryResponse.status);
       expiries = expiryPayload.data.filter((value: unknown): value is string => typeof value === "string");
     }
     const selectedExpiry = expiry ?? expiries[0];
     if (!selectedExpiry) throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR");
 
     const response = await this.fetcher(`${DHAN_API}/optionchain`, {
-      method: "POST",
-      headers: { ...this.headers(), "Content-Type": "application/json" },
-      body: JSON.stringify({ UnderlyingScrip: underlyingScrip, UnderlyingSeg: "IDX_I", Expiry: selectedExpiry }),
-      cache: "no-store",
+      method: "POST", headers: { ...this.headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ UnderlyingScrip: underlyingScrip, UnderlyingSeg: "IDX_I", Expiry: selectedExpiry }), cache: "no-store",
     });
     const payload = await this.readJson(response);
     const data = payload.status === "success" ? payload.data : null;
-    if (!data || typeof data.oc !== "object" || data.oc === null) {
-      throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR", response.status);
-    }
+    if (!data || typeof data.oc !== "object" || data.oc === null) throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR", response.status);
 
     const rows = Object.entries(data.oc as Record<string, { ce?: Record<string, unknown>; pe?: Record<string, unknown> }>).flatMap(([strikeText, legs]) => {
       const strike = numeric(strikeText);
@@ -197,36 +183,11 @@ export class DhanMarketDataProvider implements MarketDataProvider {
       const iv = data.iv_oc?.[strikeText] ?? {};
       const greeks = data.gk_oc?.[strikeText] ?? {};
       const oi = data.oi_data?.[strikeText] ?? {};
-      return [{
-        strike,
-        call: normalizeDhanOptionLeg(legs.ce, {
-          iv: iv.ce_iv,
-          oi: oi.ce_oi,
-          oiChange: oi.ce_oi_chg,
-          greeks: { delta: greeks.ce_delta, gamma: greeks.ce_gamma, theta: greeks.ce_theta, vega: greeks.ce_vega },
-        }),
-        put: normalizeDhanOptionLeg(legs.pe, {
-          iv: iv.pe_iv,
-          oi: oi.pe_oi,
-          oiChange: oi.pe_oi_chg,
-          greeks: { delta: greeks.pe_delta, gamma: greeks.pe_gamma, theta: greeks.pe_theta, vega: greeks.pe_vega },
-        }),
-      }];
+      return [{ strike, call: normalizeDhanOptionLeg(legs.ce, { iv: iv.ce_iv, oi: oi.ce_oi, oiChange: oi.ce_oi_chg, greeks: { delta: greeks.ce_delta, gamma: greeks.ce_gamma, theta: greeks.ce_theta, vega: greeks.ce_vega } }), put: normalizeDhanOptionLeg(legs.pe, { iv: iv.pe_iv, oi: oi.pe_oi, oiChange: oi.pe_oi_chg, greeks: { delta: greeks.pe_delta, gamma: greeks.pe_gamma, theta: greeks.pe_theta, vega: greeks.pe_vega } }) }];
     });
-
     const spotPrice = numeric(data.last_price);
-    if (spotPrice === null || spotPrice <= 0) {
-      throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR", response.status);
-    }
-
-    return normalizeMarketOptionChain({
-      provider: "dhan",
-      underlying: normalizedUnderlying,
-      expiry: selectedExpiry,
-      expiries,
-      spotPrice,
-      rows,
-    });
+    if (spotPrice === null || spotPrice <= 0) throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR", response.status);
+    return normalizeMarketOptionChain({ provider: "dhan", underlying: normalizedUnderlying, expiry: selectedExpiry, expiries, spotPrice, rows });
   }
 
   private headers(): HeadersInit {
@@ -306,32 +267,13 @@ export class DhanMarketDataProvider implements MarketDataProvider {
   }
 }
 
-function normalizeDhanOptionLeg(
-  source: Record<string, unknown> | undefined,
-  extras: { iv?: unknown; oi?: unknown; oiChange?: unknown; greeks?: Record<string, unknown> },
-): MarketOptionLeg | null {
+function normalizeDhanOptionLeg(source: Record<string, unknown> | undefined, extras: { iv?: unknown; oi?: unknown; oiChange?: unknown; greeks?: Record<string, unknown> }): MarketOptionLeg | null {
   if (!source) return null;
   const ltp = numeric(source.last_price ?? source.ltp);
   const previous = numeric(source.close);
   const rawGreeks = (source.greeks && typeof source.greeks === "object" ? source.greeks : {}) as Record<string, unknown>;
-  const greeks = {
-    delta: numeric(rawGreeks.delta ?? source.delta ?? extras.greeks?.delta),
-    gamma: numeric(rawGreeks.gamma ?? source.gamma ?? extras.greeks?.gamma),
-    theta: numeric(rawGreeks.theta ?? source.theta ?? extras.greeks?.theta),
-    vega: numeric(rawGreeks.vega ?? source.vega ?? extras.greeks?.vega),
-  };
+  const greeks = { delta: numeric(rawGreeks.delta ?? source.delta ?? extras.greeks?.delta), gamma: numeric(rawGreeks.gamma ?? source.gamma ?? extras.greeks?.gamma), theta: numeric(rawGreeks.theta ?? source.theta ?? extras.greeks?.theta), vega: numeric(rawGreeks.vega ?? source.vega ?? extras.greeks?.vega) };
   const hasGreeks = Object.values(greeks).some((value) => value !== null);
   const change = ltp !== null && previous !== null ? ltp - previous : numeric(source.change);
-  return {
-    ltp,
-    bid: numeric(source.top_bid_price ?? source.best_bid_price ?? source.bid_price),
-    ask: numeric(source.top_ask_price ?? source.best_ask_price ?? source.ask_price),
-    volume: numeric(source.volume),
-    oi: numeric(source.oi ?? extras.oi),
-    change,
-    change_percent: previous && change !== null ? (change / previous) * 100 : numeric(source.change_percent),
-    iv: numeric(source.implied_volatility ?? source.iv ?? extras.iv),
-    oi_change: numeric(source.oi_chg ?? extras.oiChange),
-    greeks: hasGreeks ? greeks : null,
-  };
+  return { ltp, bid: numeric(source.top_bid_price ?? source.best_bid_price ?? source.bid_price), ask: numeric(source.top_ask_price ?? source.best_ask_price ?? source.ask_price), volume: numeric(source.volume), oi: numeric(source.oi ?? extras.oi), change, change_percent: previous && change !== null ? (change / previous) * 100 : numeric(source.change_percent), iv: numeric(source.implied_volatility ?? source.iv ?? extras.iv), oi_change: numeric(source.oi_chg ?? extras.oiChange), greeks: hasGreeks ? greeks : null };
 }

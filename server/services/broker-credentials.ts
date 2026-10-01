@@ -16,7 +16,6 @@ import type {
   UpdateBrokerCredentialsPayload,
   BrokerId,
 } from "@/types/broker";
-import { getCentralCredentialsForAccount } from "@/server/services/broker-connections";
 
 const CREDENTIAL_COLUMNS = [
   "id",
@@ -103,46 +102,13 @@ export async function getBrokerCredentialById(
   return toCredentialRow(data as StoredBrokerCredential);
 }
 
-export interface BrokerCredentialTestScope {
-  trading_account_id: string | null;
-  broker_id: "dhan" | "zerodha";
-  environment: "production" | "paper" | "sandbox";
-}
-
-export async function getBrokerCredentialTestTarget(
-  id: string,
-  scope: BrokerCredentialTestScope
-): Promise<string | null> {
+async function getDecryptedCredential(id: string): Promise<{ row: StoredBrokerCredential; credentials: Record<string, string> } | null> {
   const db = createServerSupabaseClient();
-  let query = db
-    .from("broker_credentials")
-    .select("id")
-    .eq("id", id)
-    .eq("broker_id", scope.broker_id)
-    .eq("environment", scope.environment)
-  query = scope.trading_account_id
-    ? query.eq("trading_account_id", scope.trading_account_id)
-    : query.is("trading_account_id", null);
-  const { data, error } = await query.maybeSingle();
-  if (error) throw new Error("Failed to load broker credential metadata.");
-  return data?.id ?? null;
-}
-
-async function getDecryptedCredential(
-  id: string,
-  scope: BrokerCredentialTestScope
-): Promise<{ row: StoredBrokerCredential; credentials: Record<string, string> } | null> {
-  const db = createServerSupabaseClient();
-  let query = db
+  const { data, error } = await db
     .from("broker_credentials")
     .select(CREDENTIAL_COLUMNS)
     .eq("id", id)
-    .eq("broker_id", scope.broker_id)
-    .eq("environment", scope.environment)
-  query = scope.trading_account_id
-    ? query.eq("trading_account_id", scope.trading_account_id)
-    : query.is("trading_account_id", null);
-  const { data, error } = await query.maybeSingle();
+    .maybeSingle();
   if (error || !data) return null;
   const row = data as StoredBrokerCredential;
   try {
@@ -158,10 +124,23 @@ export async function getMarketDataCredentials(
   environment: "production" | "paper" | "sandbox" = "production"
 ): Promise<Record<string, string>> {
   if (!tradingAccountId) throw new MarketDataProviderError(provider, "INVALID_REQUEST");
-  return getCentralCredentialsForAccount(tradingAccountId, {
-    broker_id: provider === "kite" ? "zerodha" : "dhan",
-    environment,
-  });
+  const brokerId = provider === "kite" ? "zerodha" : "dhan";
+  const db = createServerSupabaseClient();
+  const { data, error } = await db
+    .from("broker_credentials")
+    .select("encrypted_credentials")
+    .eq("broker_id", brokerId)
+    .eq("trading_account_id", tradingAccountId)
+    .eq("environment", environment)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (error) throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
+  if (!data?.encrypted_credentials) throw new MarketDataProviderError(provider, "MISSING_CREDENTIALS");
+  try {
+    return await decryptCredentials(data.encrypted_credentials);
+  } catch {
+    throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
+  }
 }
 
 export async function getMarketDataCredentialStatus(
@@ -169,21 +148,13 @@ export async function getMarketDataCredentialStatus(
   provider: "dhan" | "kite",
   environment: "production" | "paper" | "sandbox" = "production"
 ): Promise<{ configured: boolean; is_connected: boolean; last_tested_at: string | null; last_test_result: string | null }> {
+  const brokerId = provider === "kite" ? "zerodha" : "dhan";
   const db = createServerSupabaseClient();
-  const { data: binding, error: bindingError } = await db
-    .from("trading_account_broker_connections")
-    .select("broker_connection_id")
-    .eq("trading_account_id", tradingAccountId)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (bindingError || !binding?.broker_connection_id) {
-    return { configured: false, is_connected: false, last_tested_at: null, last_test_result: null };
-  }
   const { data, error } = await db
-    .from("broker_connections")
+    .from("broker_credentials")
     .select("is_connected, last_tested_at, last_test_result")
-    .eq("id", binding.broker_connection_id)
-    .eq("broker_id", provider === "kite" ? "zerodha" : "dhan")
+    .eq("trading_account_id", tradingAccountId)
+    .eq("broker_id", brokerId)
     .eq("environment", environment)
     .eq("is_active", true)
     .maybeSingle();
@@ -207,24 +178,17 @@ export async function recordMarketDataAuthentication(
   authenticated: boolean,
   result: string
 ): Promise<void> {
+  const brokerId = provider === "kite" ? "zerodha" : "dhan";
   const db = createServerSupabaseClient();
-  const { data: binding, error: bindingError } = await db
-    .from("trading_account_broker_connections")
-    .select("broker_connection_id")
-    .eq("trading_account_id", tradingAccountId)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (bindingError || !binding?.broker_connection_id) throw new MarketDataProviderError(provider, "MISSING_CREDENTIALS");
   const { data, error } = await db
-    .from("broker_connections")
+    .from("broker_credentials")
     .update({
       is_connected: authenticated,
-      connection_status: authenticated ? "connected" : "error",
       last_tested_at: new Date().toISOString(),
-      last_test_result: authenticated ? "Authentication successful." : "Broker authentication failed.",
+      last_test_result: result,
     })
-    .eq("id", binding.broker_connection_id)
-    .eq("broker_id", provider === "kite" ? "zerodha" : "dhan")
+    .eq("trading_account_id", tradingAccountId)
+    .eq("broker_id", brokerId)
     .eq("environment", environment)
     .eq("is_active", true)
     .select("id")
@@ -258,11 +222,17 @@ export async function createBrokerCredential(
   if (payload.trading_account_id) {
     const { data: account, error: accountError } = await db
       .from("trading_accounts")
-      .select("id")
+      .select("id, broker_provider")
       .eq("id", payload.trading_account_id)
       .maybeSingle();
-    if (accountError || !account) {
-      throw new Error("The selected trading account was not found.");
+    const provider = String(account?.broker_provider ?? "").trim().toLowerCase();
+    const matchesProvider = payload.broker_id === "dhan"
+      ? provider === "dhan"
+      : payload.broker_id === "zerodha"
+        ? provider === "kite" || provider === "zerodha"
+        : provider === payload.broker_id;
+    if (accountError || !account || !matchesProvider) {
+      throw new Error("The broker provider does not match the trading account.");
     }
   }
 
@@ -356,11 +326,10 @@ export async function setActiveBroker(id: string, _employeeId: string): Promise<
 }
 
 export async function testBrokerConnection(
-  id: string,
-  scope: BrokerCredentialTestScope,
+  id: string
 ): Promise<{ success: boolean; message: string; implemented: boolean }> {
   try {
-    const loaded = await getDecryptedCredential(id, scope);
+    const loaded = await getDecryptedCredential(id);
     if (!loaded) return { success: false, message: "Broker credentials were not found.", implemented: false };
     const provider = loaded.row.broker_id === "dhan"
       ? new DhanMarketDataProvider(loaded.credentials)
@@ -370,40 +339,25 @@ export async function testBrokerConnection(
     if (!provider) return { success: false, message: "Read-only authentication is not implemented for this provider.", implemented: false };
     await provider.authenticate();
     const db = createServerSupabaseClient();
-    let updateQuery = db.from("broker_credentials").update({
+    await db.from("broker_credentials").update({
       is_connected: true,
       last_tested_at: new Date().toISOString(),
       last_test_result: "Authentication successful.",
-    }).eq("id", id)
-      .eq("broker_id", scope.broker_id)
-      .eq("environment", scope.environment);
-    updateQuery = scope.trading_account_id
-      ? updateQuery.eq("trading_account_id", scope.trading_account_id)
-      : updateQuery.is("trading_account_id", null);
-    await updateQuery;
+    }).eq("id", id);
     return { success: true, message: "Authentication successful.", implemented: true };
   } catch (err) {
     const message = err instanceof MarketDataProviderError ? err.message : "Broker authentication failed.";
     const db = createServerSupabaseClient();
-    let updateQuery = db.from("broker_credentials").update({
+    await db.from("broker_credentials").update({
       is_connected: false,
       last_tested_at: new Date().toISOString(),
       last_test_result: message,
-    }).eq("id", id)
-      .eq("broker_id", scope.broker_id)
-      .eq("environment", scope.environment);
-    updateQuery = scope.trading_account_id
-      ? updateQuery.eq("trading_account_id", scope.trading_account_id)
-      : updateQuery.is("trading_account_id", null);
-    await updateQuery;
+    }).eq("id", id);
     return { success: false, message, implemented: true };
   }
 }
 
-export async function testDhanConnection(
-  id: string,
-  scope: BrokerCredentialTestScope,
-): Promise<{ success: boolean; message: string }> {
-  const result = await testBrokerConnection(id, scope);
+export async function testDhanConnection(id: string): Promise<{ success: boolean; message: string }> {
+  const result = await testBrokerConnection(id);
   return { success: result.success, message: result.message };
 }

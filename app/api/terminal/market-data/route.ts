@@ -166,25 +166,19 @@ export async function POST(req: Request): Promise<NextResponse> {
         break;
       case "searchInstruments":
         data = (await provider.searchInstruments(request.query)).map((instrument) => {
-          if (instrument.provider !== request.provider) {
-            throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
-          }
+          if (instrument.provider !== request.provider) throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
           return normalizeMarketInstrument(instrument);
         });
         break;
       case "getQuote": {
         const quote = await provider.getQuote(request.instrument as MarketInstrument);
-        if (quote.provider !== request.provider) {
-          throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
-        }
+        if (quote.provider !== request.provider) throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
         data = normalizeMarketQuote(quote);
         break;
       }
       case "getOptionChain": {
         const optionChain = await provider.getOptionChain(request.underlying, request.expiry);
-        if (optionChain.provider !== request.provider) {
-          throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
-        }
+        if (optionChain.provider !== request.provider) throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
         data = optionChain;
         break;
       }
