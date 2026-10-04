@@ -63,9 +63,9 @@ export function ExecutionsListClient() {
               {String(r.side)}
             </span>
           )},
-          { key: "quantity", header: "Qty", className: "text-right tabular-nums" },
-          { key: "fill_price", header: "Fill Price", className: "text-right", render: (r) => <span className="tabular-nums">{formatCurrency(Number(r.fill_price))}</span> },
-          { key: "fees", header: "Fees", className: "text-right", render: (r) => <span className={`tabular-nums ${pnlClass(-Number(r.fees))}`}>{formatCurrency(Number(r.fees))}</span> },
+          { key: "quantity", header: "Qty", className: "text-right tabular-nums", render: (r) => <span className="tabular-nums">{r.quantity != null ? String(r.quantity) : "—"}</span> },
+          { key: "fill_price", header: "Fill Price", className: "text-right", render: (r) => <span className="tabular-nums">{r.fill_price != null ? formatCurrency(Number(r.fill_price)) : "—"}</span> },
+          { key: "fees", header: "Fees", className: "text-right", render: (r) => <span className={`tabular-nums ${r.fees != null ? pnlClass(-Number(r.fees)) : ""}`}>{r.fees != null ? formatCurrency(Number(r.fees)) : "—"}</span> },
           { key: "execution_status", header: "Status", render: (r) => <StatusBadge status={String(r.execution_status)} /> },
           { key: "provider", header: "Provider", render: (r) => <span className="text-xs text-muted-foreground">{String(r.provider ?? "—")}</span> },
           { key: "executed_at", header: "Executed", render: (r) => <span className="text-xs text-muted-foreground">{formatDateTime(String(r.executed_at))}</span> },

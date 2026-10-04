@@ -85,8 +85,8 @@ export function OrdersListClient() {
             </span>
           )},
           { key: "order_type", header: "Type", render: (r) => <span className="text-xs text-muted-foreground">{String(r.order_type)}</span> },
-          { key: "quantity", header: "Qty", className: "text-right tabular-nums" },
-          { key: "price", header: "Price", className: "text-right tabular-nums", render: (r) => <span className="tabular-nums">{r.price ? String(r.price) : "MKT"}</span> },
+          { key: "quantity", header: "Qty", className: "text-right tabular-nums", render: (r) => <span className="tabular-nums">{r.quantity != null ? String(r.quantity) : "—"}</span> },
+          { key: "price", header: "Price", className: "text-right tabular-nums", render: (r) => <span className="tabular-nums">{r.price != null ? String(r.price) : "MKT"}</span> },
           { key: "status", header: "Status", render: (r) => <StatusBadge status={String(r.status)} /> },
           { key: "placed_at", header: "Placed", render: (r) => <span className="text-xs text-muted-foreground">{formatDateTime(String(r.placed_at))}</span> },
         ]}
