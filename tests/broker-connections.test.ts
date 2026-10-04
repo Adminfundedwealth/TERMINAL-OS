@@ -21,8 +21,10 @@ import {
   deactivateCentralBrokerConnection,
   getCentralCredentialsForAccount,
   testCentralBrokerConnection,
+  type BrokerConnectionScope,
 } from "../server/services/broker-connections";
 import { PERMISSIONS, hasPermission } from "@/lib/rbac/permissions";
+import type { BrokerId } from "@/types/broker";
 
 function chain(result: { data?: unknown; error: null }) {
   const query: Record<string, any> = {};
@@ -47,7 +49,7 @@ describe("FundedWealth central broker connections", () => {
     { error: new MarketDataProviderError("dhan", "UPSTREAM_ERROR", 502), expected: { category: "DHAN_OTHER_HTTP_ERROR", httpStatus: 502 } },
     { error: new TypeError("fetch failed"), expected: { category: "DHAN_NETWORK_ERROR" } },
     { error: new Error("private provider details"), expected: { category: "UNKNOWN_PROVIDER_ERROR" } },
-  ])("classifies provider failures without exposing error text", ({ error, expected }) => {
+  ])("classifies provider failures without exposing error text", ({ error, expected }: { error: Error; expected: { category: string; httpStatus?: number } }) => {
     expect(classifyBrokerTestFailure("dhan", error)).toEqual(expected);
     expect(JSON.stringify(classifyBrokerTestFailure("dhan", error))).not.toContain(error.message);
   });
@@ -195,7 +197,7 @@ describe("FundedWealth central broker connections", () => {
     { broker_id: "zerodha" as const, environment: "production" as const },
     { broker_id: "dhan" as const, environment: "paper" as const },
     { broker_id: "dhan" as const, environment: "production" as const },
-  ])("does not decrypt an unbound, mismatched, or inactive connection scope", async (scope) => {
+  ])("does not decrypt an unbound, mismatched, or inactive connection scope", async (scope: BrokerConnectionScope) => {
     const bindingQuery = chain({ data: { broker_connection_id: "central-connection" }, error: null });
     const connectionQuery = chain({ data: null, error: null });
     const db = { from: vi.fn().mockReturnValueOnce(bindingQuery).mockReturnValueOnce(connectionQuery) };
