@@ -52,7 +52,7 @@ describe("scoped broker connection test route", () => {
     { broker_id: "dhan", environment: "production" },
     { broker_id: "zerodha", environment: "production" },
     { broker_id: "dhan", environment: "paper" },
-  ])("rejects an out-of-scope credential before decryption/testing", async (scope) => {
+  ])("rejects an out-of-scope credential before decryption/testing", async (scope: { broker_id: string; environment: string }) => {
     mocks.getCentralBrokerConnectionTestTarget.mockResolvedValueOnce(null);
     const response = await post(request(scope));
 

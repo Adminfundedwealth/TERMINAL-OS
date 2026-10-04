@@ -62,7 +62,7 @@ httpServer.on("upgrade", (request, socket, head) => {
     socket.destroy();
     return;
   }
-  gateway.wss.handleUpgrade(request, socket, head, (websocket) => gateway.wss.emit("connection", websocket, request));
+  gateway.wss.handleUpgrade(request, socket, head, (websocket: WebSocket) => gateway.wss.emit("connection", websocket, request));
 });
 
 httpServer.listen(port, "0.0.0.0", () => console.info(`[realtime] listening on port ${port} in ${providerMode} mode`));

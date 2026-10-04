@@ -65,7 +65,7 @@ export function createRealtimeGateway(options: GatewayOptions): { wss: WebSocket
   }, heartbeatIntervalMs);
   heartbeat.unref?.();
 
-  wss.on("connection", (socket) => {
+  wss.on("connection", (socket: WebSocket) => {
     const session: Session = { credentials: {}, lastPong: now(), cleanups: new Map() };
     sessions.set(socket, session);
     const cleanup = () => {
@@ -74,7 +74,7 @@ export function createRealtimeGateway(options: GatewayOptions): { wss: WebSocket
       sessions.delete(socket);
     };
 
-    socket.on("message", async (raw) => {
+    socket.on("message", async (raw: RawData) => {
       let message: RealtimeClientMessage;
       try {
         message = RealtimeClientMessageSchema.parse(JSON.parse(rawDataToString(raw)));
@@ -166,7 +166,7 @@ export function createRealtimeGateway(options: GatewayOptions): { wss: WebSocket
     async close() {
       clearInterval(heartbeat);
       for (const socket of sessions.keys()) socket.close(1001, "Server shutdown");
-      await new Promise<void>((resolve, reject) => wss.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) => wss.close((error?: Error) => error ? reject(error) : resolve()));
     },
   };
 }

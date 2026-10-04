@@ -264,7 +264,7 @@ export async function updateCentralBrokerConnection(
   return data ? safeRow(data as StoredConnection) : null;
 }
 
-export async function activateCentralBrokerConnection(id: string, employeeId: string): Promise<void> {
+export async function activateCentralBrokerConnection(id: string, employeeId: string): Promise<{ broker_id: BrokerId; environment: string }> {
   const db = createServerSupabaseClient();
   const { data: target, error: targetError } = await db
     .from("broker_connections")
@@ -289,18 +289,20 @@ export async function activateCentralBrokerConnection(id: string, employeeId: st
     .select("id")
     .maybeSingle();
   if (error || !data) throw new Error("Failed to activate FundedWealth broker connection.");
+  return { broker_id: target.broker_id, environment: target.environment };
 }
 
-export async function deactivateCentralBrokerConnection(id: string, employeeId: string): Promise<void> {
+export async function deactivateCentralBrokerConnection(id: string, employeeId: string): Promise<{ broker_id: BrokerId; environment: string }> {
   const db = createServerSupabaseClient();
   const { data, error } = await db
     .from("broker_connections")
     .update({ is_active: false, updated_at: new Date().toISOString(), updated_by: employeeId })
     .eq("id", id)
-    .select("id")
+    .select("id,broker_id,environment")
     .maybeSingle();
   if (error) throw new Error("Failed to deactivate FundedWealth broker connection.");
   if (!data) throw new Error("FundedWealth broker connection was not found.");
+  return { broker_id: data.broker_id as BrokerId, environment: data.environment as string };
 }
 
 export async function testCentralBrokerConnection(
@@ -431,4 +433,119 @@ export async function bindAccountToCentralBrokerConnection(
       updated_by: employeeId,
     }, { onConflict: "trading_account_id,broker_connection_id" });
   if (error) throw new Error("Failed to bind the broker connection to the trading account.");
+}
+
+/**
+ * Account binding functions
+ */
+
+export interface AccountBrokerBinding {
+  id: string;
+  trading_account_id: string;
+  broker_connection_id: string;
+  is_active: boolean;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listConnectionsForAccount(tradingAccountId: string): Promise<AccountBrokerBinding[]> {
+  const db = createServerSupabaseClient();
+  const { data, error } = await db
+    .from("trading_account_broker_connections")
+    .select("*")
+    .eq("trading_account_id", tradingAccountId)
+    .order("updated_at", { ascending: false });
+  if (error) throw new Error("Failed to fetch trading account broker connections.");
+  return (data ?? []) as AccountBrokerBinding[];
+}
+
+export async function bindAccountToConnection(
+  tradingAccountId: string,
+  brokerConnectionId: string,
+  employeeId: string,
+): Promise<AccountBrokerBinding> {
+  const db = createServerSupabaseClient();
+  
+  // Verify trading account exists
+  const { data: account, error: accountError } = await db
+    .from("trading_accounts")
+    .select("id")
+    .eq("id", tradingAccountId)
+    .maybeSingle();
+  if (accountError || !account) throw new Error("Trading account not found.");
+
+  // Verify broker connection exists and is active
+  const { data: connection, error: connectionError } = await db
+    .from("broker_connections")
+    .select("id,is_active")
+    .eq("id", brokerConnectionId)
+    .maybeSingle();
+  if (connectionError || !connection) throw new Error("Broker connection not found.");
+  if (!connection.is_active) throw new Error("Only an active broker connection can be bound.");
+
+  // Deactivate existing bindings for this account
+  await db
+    .from("trading_account_broker_connections")
+    .update({ is_active: false, updated_at: new Date().toISOString(), updated_by: employeeId })
+    .eq("trading_account_id", tradingAccountId)
+    .eq("is_active", true);
+
+  // Create or update the binding
+  const { data, error } = await db
+    .from("trading_account_broker_connections")
+    .upsert({
+      trading_account_id: tradingAccountId,
+      broker_connection_id: brokerConnectionId,
+      is_active: true,
+      created_by: employeeId,
+      updated_by: employeeId,
+    }, { onConflict: "trading_account_id,broker_connection_id" })
+    .select("*")
+    .single();
+    
+  if (error || !data) throw new Error("Failed to bind broker connection to trading account.");
+  return data as AccountBrokerBinding;
+}
+
+export async function unbindAccountFromConnection(
+  tradingAccountId: string,
+  brokerConnectionId: string,
+  employeeId: string,
+): Promise<void> {
+  const db = createServerSupabaseClient();
+  const { error } = await db
+    .from("trading_account_broker_connections")
+    .update({
+      is_active: false,
+      updated_at: new Date().toISOString(),
+      updated_by: employeeId,
+    })
+    .eq("trading_account_id", tradingAccountId)
+    .eq("broker_connection_id", brokerConnectionId);
+    
+  if (error) throw new Error("Failed to unbind broker connection from trading account.");
+}
+
+
+/**
+ * Alias for backward compatibility
+ */
+export const listCentralBrokerConnections = getCentralBrokerConnections;
+export const getCentralBrokerConnection = getCentralBrokerConnectionById;
+
+/**
+ * Wrapper for route-compatible signature
+ */
+export async function createCentralBrokerConnectionFromPayload(
+  payload: { broker_id: BrokerId; environment: "production" | "paper" | "sandbox"; label: string; credentials: BrokerCredentialMap },
+  employeeId: string,
+): Promise<BrokerConnectionRow> {
+  return createCentralBrokerConnection(
+    { broker_id: payload.broker_id, environment: payload.environment },
+    payload.label,
+    payload.credentials,
+    employeeId
+  );
 }

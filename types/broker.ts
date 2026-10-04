@@ -15,6 +15,8 @@ export type BrokerId =
   | "fyers"
   | "alice_blue";
 
+export type BrokerEnvironment = "production" | "paper" | "sandbox";
+
 // -------------------------------------------------------
 // CREDENTIAL FIELD DEFINITIONS
 // -------------------------------------------------------

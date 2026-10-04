@@ -75,7 +75,7 @@ describe("persistent realtime gateway", () => {
     const providers: ProviderRegistry = { get: () => provider };
     gateway = createRealtimeGateway({ ticketSecret: secret, ticketStore: new MemoryTicketStore(), providers, reauthorize, heartbeatIntervalMs: 40, staleAfterMs: 1000 });
     server = createServer();
-    server.on("upgrade", (request, socket, head) => gateway!.wss.handleUpgrade(request, socket, head, (websocket) => gateway!.wss.emit("connection", websocket, request)));
+    server.on("upgrade", (request, socket, head) => gateway!.wss.handleUpgrade(request, socket, head, (websocket: WebSocket) => gateway!.wss.emit("connection", websocket, request)));
     await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Test server did not bind.");

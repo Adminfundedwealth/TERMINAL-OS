@@ -87,7 +87,7 @@ describe("Dhan read-only market data provider", () => {
   });
 
   it("normalizes a Dhan option chain through expiry discovery", async () => {
-    const fetcher = vi.fn<Fetcher>(async (input) => {
+    const fetcher = vi.fn<Fetcher>(async (input: RequestInfo | URL) => {
       if (String(input).includes("expirylist")) return jsonResponse({ status: "success", data: ["2026-10-01"] });
       return jsonResponse({ status: "success", data: {
         last_price: 25100,

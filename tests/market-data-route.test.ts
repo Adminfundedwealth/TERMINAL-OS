@@ -170,7 +170,7 @@ describe("account-scoped market-data API", () => {
     expect(mocks.createStoredMarketDataProvider).not.toHaveBeenCalled();
   });
 
-  it.each([["dhan", "production"], ["kite", "paper"]] as const)("routes authorized %s %s requests to its account/environment provider", async (broker, environment) => {
+  it.each([["dhan", "production"], ["kite", "paper"]] as const)("routes authorized %s %s requests to its account/environment provider", async (broker: "dhan" | "kite", environment: "production" | "paper") => {
     provider.searchInstruments.mockResolvedValueOnce([{
       provider: broker,
       providerInstrumentId: "13",
