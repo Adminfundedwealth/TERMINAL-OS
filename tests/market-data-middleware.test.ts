@@ -9,7 +9,7 @@ afterEach(() => {
   else process.env.MAIN_TERMINAL_ORIGINS = previousOrigins;
 });
 
-describe("market-data CORS middleware", () => {
+describe("Main Terminal API CORS middleware", () => {
   it("permits preflight only from explicitly configured customer app origins", async () => {
     process.env.MAIN_TERMINAL_ORIGINS = "https://main.example.test,https://staging.example.test";
 
@@ -40,4 +40,20 @@ describe("market-data CORS middleware", () => {
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://charts.fundedwealth.com");
     expect(response.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
   });
+
+  it.each(["system-health", "watchlists"])(
+    "permits the configured Main Terminal origin on the %s API",
+    async (endpoint) => {
+      process.env.MAIN_TERMINAL_ORIGINS = "https://charts.fundedwealth.com";
+
+      const response = await middleware(new NextRequest(`https://terminal.test/api/terminal/${endpoint}`, {
+        method: "OPTIONS",
+        headers: { origin: "https://charts.fundedwealth.com" },
+      }));
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://charts.fundedwealth.com");
+      expect(response.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+    },
+  );
 });

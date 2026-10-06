@@ -11,12 +11,14 @@ const LOCAL_TRADER_ORIGINS = new Set([
 function applyApiCors(request: NextRequest, response: NextResponse): NextResponse {
   const origin = request.headers.get("origin");
   if (!origin) return response;
-  const isCustomerDataRoute = [
+  const isMainTerminalRoute = [
     "/api/terminal/market-data",
     "/api/terminal/market-data/stream",
     "/api/terminal/orders",
+    "/api/terminal/system-health",
+    "/api/terminal/watchlists",
   ].includes(request.nextUrl.pathname);
-  const configuredCustomerOrigins = isCustomerDataRoute
+  const configuredCustomerOrigins = isMainTerminalRoute
     ? (process.env.MAIN_TERMINAL_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean)
     : [];
   if (!LOCAL_TRADER_ORIGINS.has(origin) && !configuredCustomerOrigins.includes(origin)) return response;
