@@ -3,14 +3,27 @@ import type { Employee } from "@/types";
 import { UnauthenticatedError } from "@/lib/rbac/permissions";
 import { getTerminalOsAdminRole, toTerminalOsEmployee } from "@/lib/auth/admin-access";
 
-export async function getAuthenticatedEmployee(): Promise<Employee | null> {
+export async function getAuthenticatedEmployee(req?: Request): Promise<Employee | null> {
+  const authorization = req?.headers.get("authorization");
+  const bearerMatch = authorization?.match(/^Bearer\s+([^\s]+)$/i);
+
+  // An explicitly supplied but malformed or non-Bearer credential must not
+  // fall back to a different employee session from cookies.
+  if (authorization !== null && authorization !== undefined && !bearerMatch) {
+    return null;
+  }
+
+  const accessToken = bearerMatch?.[1];
+
   try {
     const { createRouteHandlerSupabaseClient } = await import(
       "@/lib/supabase/route-handler-client"
     );
 
-    const client = await createRouteHandlerSupabaseClient();
-    const { data: { user }, error } = await client.auth.getUser();
+    const client = await createRouteHandlerSupabaseClient(accessToken);
+    const { data: { user }, error } = accessToken
+      ? await client.auth.getUser(accessToken)
+      : await client.auth.getUser();
     if (error || !user) return null;
 
     const role = getTerminalOsAdminRole(user.email);
@@ -39,8 +52,8 @@ export async function getAuthenticatedCustomerFromRequest(
   }
 }
 
-export async function requireAuthenticatedEmployee(): Promise<Employee> {
-  const employee = await getAuthenticatedEmployee();
+export async function requireAuthenticatedEmployee(req?: Request): Promise<Employee> {
+  const employee = await getAuthenticatedEmployee(req);
   if (!employee) throw new UnauthenticatedError();
   return employee;
 }

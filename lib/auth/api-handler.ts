@@ -19,7 +19,7 @@ type ApiHandler = (ctx: HandlerContext) => Promise<NextResponse>;
 export function withAuth(permission: Permission | null, handler: ApiHandler) {
   return async (req: NextRequest): Promise<NextResponse> => {
     try {
-      const employee = await requireAuthenticatedEmployee();
+      const employee = await requireAuthenticatedEmployee(req);
 
       if (permission) {
         requirePermission(employee.role, permission);
