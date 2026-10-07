@@ -5,7 +5,7 @@
 import { NextResponse } from "next/server";
 import { withAuth, handleApiError } from "@/lib/auth/api-handler";
 import { PERMISSIONS } from "@/lib/rbac/permissions";
-import { activateCentralBrokerConnection, getCentralBrokerConnectionById } from "@/server/services/broker-connections";
+import { getBrokerCredentialById, setActiveBroker } from "@/server/services/broker-credentials";
 import { writeActivityLog } from "@/lib/logger";
 
 function getId(req: Request): string {
@@ -16,7 +16,7 @@ function getId(req: Request): string {
 export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }) => {
   try {
     const id = getId(req);
-    const record = await getCentralBrokerConnectionById(id);
+    const record = await getBrokerCredentialById(id);
 
     if (!record) {
       return NextResponse.json(
@@ -25,13 +25,13 @@ export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }
       );
     }
 
-    await activateCentralBrokerConnection(id, employee.id);
+    await setActiveBroker(id, employee.id);
 
     await writeActivityLog({
       employee_id: employee.id,
       action: "BROKER_SET_ACTIVE",
       module: "broker",
-      resource: "broker_connections",
+      resource: "broker_credentials",
       resource_id: id,
       result: "SUCCESS",
       metadata: { broker_id: record.broker_id, label: record.label },
