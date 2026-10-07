@@ -27,12 +27,32 @@ export function withAuth(permission: Permission | null, handler: ApiHandler) {
 
       return await handler({ employee, req });
     } catch (err) {
-      return handleApiError(err);
+      return handleApiError(err, req);
     }
   };
 }
 
-export function handleApiError(err: unknown): NextResponse {
+function getErrorLogMetadata(err: unknown): { message: string; error_code?: string } {
+  if (err instanceof Error) return { message: err.message };
+  if (typeof err === "string") return { message: err };
+
+  if (typeof err === "object" && err !== null) {
+    const error = err as { message?: unknown; code?: unknown; error_code?: unknown };
+    const message = typeof error.message === "string"
+      ? error.message
+      : "Unhandled non-Error exception";
+    const code = typeof error.code === "string"
+      ? error.code
+      : typeof error.error_code === "string"
+        ? error.error_code
+        : undefined;
+    return { message, ...(code ? { error_code: code } : {}) };
+  }
+
+  return { message: "Unhandled non-Error exception" };
+}
+
+export function handleApiError(err: unknown, req?: NextRequest): NextResponse {
   if (err instanceof UnauthenticatedError) {
     return NextResponse.json(
       { error: { code: "UNAUTHENTICATED", message: "Authentication required." } },
@@ -46,7 +66,8 @@ export function handleApiError(err: unknown): NextResponse {
     );
   }
   serverLog("error", "api", "unhandled_error", {
-    message: err instanceof Error ? err.message : String(err),
+    ...getErrorLogMetadata(err),
+    ...(req ? { method: req.method, path: req.nextUrl.pathname } : {}),
   });
   return NextResponse.json(
     { error: { code: "INTERNAL_ERROR", message: "An internal error occurred." } },
