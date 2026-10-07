@@ -35,7 +35,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("Dhan read-only market data provider", () => {
   it("authenticates through the Dhan profile endpoint", async () => {
-    const fetcher = vi.fn<Fetcher>(async () => jsonResponse({ status: "success", data: { dhanClientId: "masked" } }));
+    const fetcher = vi.fn<Fetcher>(async () => jsonResponse({ dhanClientId: "masked", tokenValidity: "30/03/2025 15:37" }));
     const provider = new DhanMarketDataProvider(dhanCredentials, fetcher);
 
     const result = await provider.authenticate();
@@ -219,7 +219,7 @@ describe("provider isolation", () => {
   });
 
   it("sends each provider's credentials only to its own upstream", async () => {
-    const dhanFetch = vi.fn<Fetcher>(async () => jsonResponse({ status: "success", data: {} }));
+    const dhanFetch = vi.fn<Fetcher>(async () => jsonResponse({ dhanClientId: "masked" }));
     const kiteFetch = vi.fn<Fetcher>(async () => jsonResponse({ status: "success", data: {} }));
 
     await new DhanMarketDataProvider(dhanCredentials, dhanFetch).authenticate();

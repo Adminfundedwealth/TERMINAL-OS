@@ -56,7 +56,7 @@ export class DhanMarketDataProvider implements MarketDataProvider {
   async authenticate(): Promise<{ authenticated: true }> {
     const response = await this.fetcher(`${DHAN_API}/profile`, { headers: this.headers(), cache: "no-store" });
     const payload = await this.readJson(response);
-    if (!payload || payload.status !== "success" || !payload.data) {
+    if (!payload || typeof payload.dhanClientId !== "string" || !payload.dhanClientId) {
       throw new MarketDataProviderError("dhan", "INVALID_CREDENTIALS", response.status);
     }
     return { authenticated: true };
