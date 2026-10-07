@@ -180,31 +180,18 @@ async function checkDhan(accountId: string | null): Promise<MarketDataHealthChec
       }
     }
 
-    let connectionId: string | null = null;
-    if (accountId) {
-      const { data: binding, error: bindingError } = await db
-        .from("trading_account_broker_connections")
-        .select("broker_connection_id")
-        .eq("trading_account_id", accountId)
-        .eq("is_active", true)
-        .maybeSingle();
-      if (bindingError) return result("dhan", "ERROR", started, "Dhan binding status is unavailable.");
-      connectionId = binding?.broker_connection_id ?? null;
-      if (!connectionId) return result("dhan", "OFFLINE", started, "No Dhan connection is bound to this account.");
-    }
-
     let query = db
-      .from("broker_connections")
-      .select("is_active,is_connected,connection_status,last_tested_at,last_test_result")
+      .from("broker_credentials")
+      .select("is_active,is_connected,last_tested_at,last_test_result")
       .eq("broker_id", "dhan")
-      .eq("environment", "production");
-    query = connectionId
-      ? query.eq("id", connectionId)
-      : query.eq("is_active", true);
+      .eq("environment", "production")
+      .eq("is_active", true);
+    if (accountId) query = query.eq("trading_account_id", accountId);
+    query = query.limit(1);
     const { data: row, error } = await query.maybeSingle();
     if (error) return result("dhan", "ERROR", started, "Dhan credential status is unavailable.");
-    if (!row) return result("dhan", "OFFLINE", started, "No active FundedWealth Dhan connection is configured.");
-    if (row.is_active === true && row.is_connected === true && row.connection_status === "connected") {
+    if (!row) return result("dhan", "OFFLINE", started, "No active Dhan credential is configured.");
+    if (row.is_active === true && row.is_connected === true) {
       return result("dhan", "ONLINE", started, "Most recent Dhan authentication test succeeded.");
     }
     const detail = row.last_tested_at

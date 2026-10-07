@@ -10,6 +10,7 @@ function createQuery(data: unknown) {
   const query: Record<string, (...args: any[]) => any> = {};
   query.select = vi.fn(() => query);
   query.eq = vi.fn(() => query);
+  query.limit = vi.fn(() => query);
   query.maybeSingle = vi.fn(async () => ({ data, error: null }));
   return query;
 }
@@ -39,18 +40,16 @@ describe("Terminal OS market-data health checks", () => {
 
   it("performs real NSE and TradingView requests and reports the stored Dhan failure without retrying", async () => {
     const accountQuery = createQuery({ id: "account-1", status: "active", is_active: true });
-    const bindingQuery = createQuery({ broker_connection_id: "central-connection" });
-    const connectionQuery = createQuery({
+    const credentialQuery = createQuery({
       is_active: false,
       is_connected: false,
-      connection_status: "error",
       last_tested_at: "2026-09-29T20:30:32.378Z",
       last_test_result: "Broker authentication failed.",
     });
     const db = {
       from: vi.fn((table: string) => table === "trading_accounts"
         ? accountQuery
-        : table === "trading_account_broker_connections" ? bindingQuery : connectionQuery),
+        : credentialQuery),
       rpc: vi.fn(),
     };
     vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
@@ -88,10 +87,48 @@ describe("Terminal OS market-data health checks", () => {
       "https://www.nseindia.com/api/allIndices",
       "https://scanner.tradingview.com/india/scan",
     ].sort());
-    expect(bindingQuery.select).toHaveBeenCalledWith("broker_connection_id");
-    expect(connectionQuery.select).toHaveBeenCalledWith("is_active,is_connected,connection_status,last_tested_at,last_test_result");
+    expect(db.from).toHaveBeenCalledWith("broker_credentials");
+    expect(credentialQuery.select).toHaveBeenCalledWith("is_active,is_connected,last_tested_at,last_test_result");
+    expect(credentialQuery.eq).toHaveBeenCalledWith("trading_account_id", "account-1");
     expect(JSON.stringify(health)).not.toContain("encrypted_credentials");
     expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it("reports Dhan online from an active tested credential", async () => {
+    const credentialQuery = createQuery({
+      is_active: true,
+      is_connected: true,
+      last_tested_at: "2026-10-07T03:51:04.408Z",
+      last_test_result: "Authentication successful.",
+    });
+    const db = {
+      from: vi.fn(() => credentialQuery),
+      rpc: vi.fn(),
+    };
+    vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
+
+    const fetcher = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (url === "https://www.nseindia.com/") return new Response("<html></html>", { status: 200 });
+      if (url === "https://www.nseindia.com/api/allIndices") {
+        return new Response(JSON.stringify({ data: [{ index: "NIFTY 50" }] }), { status: 200 });
+      }
+      if (url === "https://scanner.tradingview.com/india/scan") {
+        return new Response(JSON.stringify({
+          data: [{ s: "NSE:RELIANCE", d: ["RELIANCE", "Reliance Industries", 1250, 2.5, 30, 1000, 1200, 1260, 1190, "Energy"] }],
+        }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const health = await getMarketDataHealth(null, fetcher);
+
+    expect(health.data.find((check) => check.id === "dhan"))
+      .toMatchObject({ status: "ONLINE", detail: "Most recent Dhan authentication test succeeded." });
+    expect(credentialQuery.eq).toHaveBeenCalledWith("broker_id", "dhan");
+    expect(credentialQuery.eq).toHaveBeenCalledWith("environment", "production");
+    expect(credentialQuery.eq).toHaveBeenCalledWith("is_active", true);
+    expect(credentialQuery.limit).toHaveBeenCalledWith(1);
   });
 
   it("does not report NSE online when the real data request fails", async () => {
