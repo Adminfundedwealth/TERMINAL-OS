@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthenticatedCustomerFromRequest } from "@/lib/auth/session";
+import { mainTerminalCorsHeaders, mainTerminalOptionsResponse } from "@/lib/terminal-cors";
 import { serverLog } from "@/lib/logger";
 import { authorizeMarketDataAccount } from "@/server/services/market-data-access";
 import {
@@ -54,20 +55,8 @@ const StatusQuerySchema = z.object({
   environment: z.enum(["production", "paper", "sandbox"]).default("production"),
 });
 
-function allowedOrigins(): string[] {
-  return (process.env.MAIN_TERMINAL_ORIGINS ?? "")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-}
-
 function corsHeaders(req: Request): HeadersInit {
-  const origin = req.headers.get("origin");
-  const headers: Record<string, string> = { Vary: "Origin" };
-  if (origin && allowedOrigins().includes(origin)) {
-    headers["Access-Control-Allow-Origin"] = origin;
-  }
-  return headers;
+  return mainTerminalCorsHeaders(req);
 }
 
 function json(req: Request, body: unknown, status = 200): NextResponse {
@@ -88,16 +77,7 @@ function errorStatus(error: MarketDataProviderError): number {
 }
 
 export async function OPTIONS(req: Request): Promise<Response> {
-  const origin = req.headers.get("origin");
-  if (origin && !allowedOrigins().includes(origin)) return new Response(null, { status: 403 });
-  return new Response(null, {
-    status: 204,
-    headers: {
-      ...corsHeaders(req),
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Authorization, Content-Type",
-    },
-  });
+  return mainTerminalOptionsResponse(req, "GET, POST, OPTIONS");
 }
 
 export async function GET(req: Request): Promise<NextResponse> {

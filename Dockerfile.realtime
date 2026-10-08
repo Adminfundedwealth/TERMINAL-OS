@@ -6,7 +6,7 @@ RUN npm ci --omit=optional
 COPY . .
 
 ENV NODE_ENV=production
-ENV REALTIME_PROVIDER_MODE=mock
+ENV REALTIME_PROVIDER_MODE=dhan
 EXPOSE 4012
 
 CMD ["npm", "run", "realtime:start"]

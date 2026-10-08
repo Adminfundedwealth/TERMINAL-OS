@@ -3,7 +3,7 @@ import { createClient } from "redis";
 import { WebSocket } from "ws";
 import { encodeRealtimeTicket } from "../brokers/realtime-ticket";
 import { createRealtimeGateway } from "./gateway";
-import { MockProviderRegistry } from "./provider";
+import { MockProviderRegistry, ProductionProviderRegistry } from "./provider";
 import { RedisTicketStore } from "./ticket-store";
 
 const required = (name: string): string => {
@@ -17,9 +17,12 @@ const serviceAuthSecret = required("REALTIME_SERVICE_AUTH_SECRET");
 const terminalOsUrl = required("TERMINAL_OS_URL").replace(/\/$/, "");
 const redisUrl = required("REDIS_URL");
 const port = Number(process.env.PORT || process.env.REALTIME_PORT || 4012);
-const providerMode = process.env.REALTIME_PROVIDER_MODE || "mock";
+const providerMode = process.env.REALTIME_PROVIDER_MODE || "dhan";
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid realtime service port.");
-if (providerMode !== "mock") throw new Error("Only the mocked realtime provider is enabled in this implementation.");
+if (providerMode !== "dhan" && providerMode !== "mock") throw new Error("Invalid realtime provider mode.");
+if (providerMode === "mock" && process.env.NODE_ENV === "production") {
+  throw new Error("Mock market data is not allowed in the production realtime service.");
+}
 
 const redis = createClient({ url: redisUrl });
 redis.on("error", () => console.error("[realtime] Redis connection unavailable."));
@@ -28,7 +31,7 @@ await redis.connect();
 const gateway = createRealtimeGateway({
   ticketSecret,
   ticketStore: new RedisTicketStore(redis),
-  providers: new MockProviderRegistry(),
+  providers: providerMode === "mock" ? new MockProviderRegistry() : new ProductionProviderRegistry(),
   reauthorize: async (claims) => {
     try {
       const response = await fetch(`${terminalOsUrl}/api/terminal/realtime-reauthorize`, {

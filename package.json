@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "realtime:start": "tsx server/realtime/main.ts",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "test": "vitest run",

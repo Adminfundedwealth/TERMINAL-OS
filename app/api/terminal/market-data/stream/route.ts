@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthenticatedCustomerFromRequest } from "@/lib/auth/session";
+import { mainTerminalCorsHeaders, mainTerminalOptionsResponse } from "@/lib/terminal-cors";
 import { serverLog } from "@/lib/logger";
 import { authorizeMarketDataAccount } from "@/server/services/market-data-access";
 import { createStoredMarketDataProvider } from "@/server/brokers/provider-factory";
@@ -18,19 +19,16 @@ const StreamQuerySchema = z.object({
   symbols: z.string().min(1).max(1000).transform((value) => [...new Set(value.split(",").map((symbol) => symbol.trim()).filter(Boolean))]).refine((symbols) => symbols.length > 0 && symbols.length <= 25 && symbols.every((symbol) => symbol.length <= 100)),
 });
 
-function allowedOrigins(): string[] {
-  return (process.env.MAIN_TERMINAL_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean);
-}
-
 function corsHeaders(req: Request): Record<string, string> {
-  const origin = req.headers.get("origin");
-  const headers: Record<string, string> = { Vary: "Origin", "Cache-Control": "no-store" };
-  if (origin && allowedOrigins().includes(origin)) headers["Access-Control-Allow-Origin"] = origin;
-  return headers;
+  return { ...mainTerminalCorsHeaders(req), "Cache-Control": "no-store" };
 }
 
 function errorResponse(req: Request, code: string, message: string, status: number): NextResponse {
   return NextResponse.json({ error: { code, message } }, { status, headers: corsHeaders(req) });
+}
+
+export async function OPTIONS(req: Request): Promise<Response> {
+  return mainTerminalOptionsResponse(req, "GET, OPTIONS");
 }
 
 function frame(event: string, payload: unknown): Uint8Array {

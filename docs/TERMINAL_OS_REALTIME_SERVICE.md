@@ -1,12 +1,12 @@
 # Terminal OS Persistent Market-Data Service
 
-Status: contract/design only. The current Vercel deployment remains HTTP-only; no persistent WebSocket runtime is implemented or deployed here.
+Status: the authenticated persistent WebSocket runtime and Dhan provider are implemented in `server/realtime`. Deploy this service as an always-on Node process; the Vercel app remains HTTP-only.
 
 ## Runtime Boundary
 
 Run the provider WebSocket in a dedicated always-on Node service compatible with FundedWealth's persistent-service infrastructure. Keep the Vercel app responsible for admin configuration, customer account authorization, short-lived realtime-ticket issuance, and REST market-data operations. Do not keep a provider socket inside a Vercel request handler.
 
-The persistent service owns upstream Dhan/Kite socket connections, provider protocol parsing, subscription fan-out, reconnect/backoff, and normalized downstream messages. It must never log upstream URLs containing provider credentials.
+The persistent service owns upstream Dhan socket connections, provider protocol parsing, subscription fan-out, reconnect/backoff, and normalized downstream messages. Dhan subscriptions are multiplexed by account and environment. Kite realtime remains unsupported and is rejected rather than returning mock ticks. The service must never log upstream URLs containing provider credentials.
 
 ## Authentication and Subscription
 
@@ -17,7 +17,7 @@ The persistent service owns upstream Dhan/Kite socket connections, provider prot
 5. For every subscription, validate account ownership/activity again and call the server-only `authorizeRealtimeMarketDataSubscription` helper. It resolves the active `trading_account_broker_connections` binding, then loads only the central `broker_credentials` row matching provider, environment, and `is_active=true`. The returned credential map is service-internal and must never enter any message or log.
 6. Validate each requested instrument against the selected provider. Never switch provider/account credentials when a subscription fails.
 
-The helper `authorizeRealtimeMarketDataSubscription` and central binding migration are implemented server-side. The ticket endpoint, persistent socket process, and deployment wiring are not implemented in this change.
+The persistent service reauthorizes account ownership and reloads the active Dhan credential from Terminal OS for each subscription. Configure the Railway service to build with `Dockerfile.realtime`, expose its assigned `PORT`, and set `TERMINAL_OS_URL`, `REALTIME_TICKET_SECRET`, `REALTIME_SERVICE_AUTH_SECRET`, and `REDIS_URL`. The production provider mode is `dhan`; mock mode is development-only and the process refuses to start with mock data in production. Verify `GET /healthz` reports `provider_mode: "dhan"` after deployment.
 
 ## Message Contract
 
