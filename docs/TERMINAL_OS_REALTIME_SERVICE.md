@@ -47,7 +47,7 @@ Use bounded exponential backoff with jitter. On reconnect, obtain a fresh ticket
 | Indices | `getQuote` per authorized provider instrument; future `index` stream | Still uses Main proxy NSE and Main proxy WebSocket. |
 | Futures | `searchInstruments` + `getQuote` | Still obtains quotes from Main Kite adapter. |
 | Option Chain | `getOptionChain` REST operation | Added to Terminal OS; Main currently uses Kite OAuth. |
-| Watchlist | `quote`/`index` stream subscription | Still derives prices from Main F&O/NSE hooks; symbols only are in localStorage. |
+| Watchlist | `POST /api/terminal/market-data` `getQuotes` (up to 1,000 instruments) | Account-scoped quotes use authorized provider batches; no-account mode uses central quotes. Saved symbols remain in localStorage, and mini-chart history loads only near the viewport. |
 | Charts | `POST /api/terminal/market-data` `getHistoricalCandles` | Already partially calls the gateway when account provider maps to Dhan/Kite; current account provider may be unset. |
 | Instrument Explorer | `searchInstruments` + `getQuote` | Existing gateway quote call is limited to Kite derivatives; stocks/indices rows are sourced elsewhere. |
 | Dashboard/live quotes | `connection`, `index`, and `quote` WebSocket messages | Still uses the Main proxy relay. |

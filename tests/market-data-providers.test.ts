@@ -73,6 +73,23 @@ describe("Dhan read-only market data provider", () => {
     expect(quote).toMatchObject({ provider: "dhan", ltp: 25100, previousClose: 25000, change: 100, volume: 42 });
   });
 
+  it("fetches Dhan quotes in one request for instruments in the same segment", async () => {
+    const secondInstrument = { ...dhanInstrument, providerInstrumentId: "14", symbol: "NIFTY BANK", tradingSymbol: "BANKNIFTY" };
+    const fetcher = vi.fn<Fetcher>(async () => jsonResponse({ data: { IDX_I: {
+      "13": { last_price: 25100, last_trade_time: "2026-10-11T09:15:00+05:30", ohlc: { close: 25000 } },
+      "14": { last_price: 52000, last_trade_time: "2026-10-11T09:15:00+05:30", ohlc: { close: 51900 } },
+    } } }));
+    const provider = new DhanMarketDataProvider(dhanCredentials, fetcher);
+
+    const quotes = await provider.getQuotes([dhanInstrument, secondInstrument]);
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0][0])).toContain("/marketfeed/quote");
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({ IDX_I: [13, 14] });
+    expect(quotes.map(({ ltp }) => ltp)).toEqual([25100, 52000]);
+    expect(quotes[0].timestamp).toBe("2026-10-11T09:15:00+05:30");
+  });
+
   it("normalizes Dhan historical candles", async () => {
     const fetcher = vi.fn<Fetcher>(async () => jsonResponse({ data: {
       timestamp: ["2026-09-28 09:15:00"], open: [100], high: [105], low: [99], close: [103], volume: [900],
@@ -170,6 +187,35 @@ describe("Kite read-only market data provider", () => {
 
     expect(String(fetcher.mock.calls[0][0])).toContain("/quote?");
     expect(quote).toMatchObject({ provider: "kite", ltp: 25100, previousClose: 25000, change: 100 });
+  });
+
+  it("fetches Kite quotes in bounded batches", async () => {
+    const instruments = Array.from({ length: 76 }, (_, index) => ({
+      ...kiteInstrument,
+      providerInstrumentId: String(256265 + index),
+      symbol: `INDEX${index}`,
+      tradingSymbol: `INDEX ${index}`,
+    }));
+    const fetcher = vi.fn<Fetcher>(async (input: RequestInfo | URL) => {
+      const query = new URL(String(input)).searchParams.getAll("i");
+      return jsonResponse({
+        status: "success",
+        data: Object.fromEntries(query.map((key) => [key, {
+          last_price: 25000,
+          timestamp: "2026-10-11T09:15:00+05:30",
+          ohlc: { close: 24900 },
+        }])),
+      });
+    });
+    const provider = new KiteMarketDataProvider(kiteCredentials, fetcher);
+
+    const quotes = await provider.getQuotes(instruments);
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(quotes).toHaveLength(76);
+    expect(quotes[0].timestamp).toBe("2026-10-11T09:15:00+05:30");
+    expect(new URL(String(fetcher.mock.calls[0][0])).searchParams.getAll("i")).toHaveLength(75);
+    expect(new URL(String(fetcher.mock.calls[1][0])).searchParams.getAll("i")).toHaveLength(1);
   });
 
   it("normalizes Kite historical candles", async () => {

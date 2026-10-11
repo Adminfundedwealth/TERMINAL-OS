@@ -21,6 +21,17 @@ const INTERVALS: Record<string, string> = {
   "1m": "1", "1": "1", "5m": "5", "5": "5", "15m": "15", "15": "15",
   "25m": "25", "25": "25", "60m": "60", "60": "60", day: "day", "1d": "day",
 };
+type DhanQuotePayload = {
+  data?: Record<string, Record<string, {
+    last_price?: unknown;
+    last_trade_time?: unknown;
+    timestamp?: unknown;
+    volume?: unknown;
+    oi?: unknown;
+    previous_close?: unknown;
+    ohlc?: Record<string, unknown>;
+  }>>;
+};
 
 function credential(credentials: BrokerCredentialMap, ...keys: string[]): string {
   for (const key of keys) {
@@ -104,6 +115,60 @@ export class DhanMarketDataProvider implements MarketDataProvider {
       openInterest: numeric(quote.oi),
       timestamp: String(quote.last_trade_time ?? new Date().toISOString()),
     };
+  }
+
+  async getQuotes(instruments: MarketInstrument[]): Promise<MarketQuote[]> {
+    if (instruments.length === 0 || instruments.length > 1000) {
+      throw new MarketDataProviderError("dhan", "INVALID_REQUEST");
+    }
+    for (const instrument of instruments) this.validateInstrument(instrument);
+
+    const bySegment = new Map<string, MarketInstrument[]>();
+    for (const instrument of instruments) {
+      const segmentInstruments = bySegment.get(instrument.exchangeSegment) ?? [];
+      segmentInstruments.push(instrument);
+      bySegment.set(instrument.exchangeSegment, segmentInstruments);
+    }
+
+    const payloads = new Map<string, DhanQuotePayload>();
+    for (const [segment, segmentInstruments] of bySegment) {
+      const response = await this.fetcher(`${DHAN_API}/marketfeed/quote`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({
+          [segment]: segmentInstruments.map((instrument) => Number(instrument.providerInstrumentId)),
+        }),
+        cache: "no-store",
+      });
+      payloads.set(segment, await this.readJson(response));
+    }
+
+    return instruments.flatMap((instrument) => {
+      const raw = payloads.get(instrument.exchangeSegment)?.data?.[instrument.exchangeSegment]?.[instrument.providerInstrumentId];
+      if (!raw) return [];
+      const quoteTimestamp = raw.last_trade_time ?? raw.timestamp;
+      if (typeof quoteTimestamp !== "string" && typeof quoteTimestamp !== "number") return [];
+      const ltp = numeric(raw.last_price);
+      if (ltp === null) return [];
+      const previousClose = numeric(raw.ohlc?.close ?? raw.previous_close);
+      const change = previousClose === null ? null : ltp - previousClose;
+      return [{
+        provider: "dhan" as const,
+        symbol: instrument.symbol,
+        tradingSymbol: instrument.tradingSymbol,
+        exchange: instrument.exchange,
+        ltp,
+        open: numeric(raw.ohlc?.open),
+        high: numeric(raw.ohlc?.high),
+        low: numeric(raw.ohlc?.low),
+        previousClose,
+        change,
+        changePercent: previousClose && change !== null ? (change / previousClose) * 100 : null,
+        volume: numeric(raw.volume),
+        openInterest: numeric(raw.oi),
+        timestamp: String(quoteTimestamp),
+      }];
+    });
   }
 
   async getHistoricalCandles(

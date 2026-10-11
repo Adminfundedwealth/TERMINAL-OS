@@ -111,6 +111,7 @@ export interface MarketDataProvider {
   authenticate(): Promise<{ authenticated: true }>;
   searchInstruments(query: string): Promise<MarketInstrument[]>;
   getQuote(instrument: MarketInstrument): Promise<MarketQuote>;
+  getQuotes(instruments: MarketInstrument[]): Promise<MarketQuote[]>;
   getHistoricalCandles(
     instrument: MarketInstrument,
     interval: string,

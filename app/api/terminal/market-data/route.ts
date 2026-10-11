@@ -36,6 +36,7 @@ const RequestSchema = z.discriminatedUnion("operation", [
   z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("authenticate") }),
   z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("searchInstruments"), query: z.string().trim().min(1).max(100) }),
   z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getQuote"), instrument: InstrumentSchema }),
+  z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getQuotes"), instruments: z.array(InstrumentSchema).min(1).max(1000) }),
   z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getOptionChain"), underlying: z.string().trim().min(1).max(32), expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
   z.object({
     account_id: z.string().uuid(),
@@ -67,6 +68,7 @@ function json(req: Request, body: unknown, status = 200): NextResponse {
 }
 
 function errorStatus(error: MarketDataProviderError): number {
+  if (error.upstreamStatus === 429) return 429;
   if (error.code === "INVALID_CREDENTIALS") return 401;
   if (error.code === "MISSING_CREDENTIALS" || error.code === "CREDENTIAL_STORAGE_ERROR") return 424;
   if (error.code === "ACCOUNT_NOT_FOUND") return 403;
@@ -134,6 +136,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   if ("instrument" in request && request.instrument.provider !== request.provider) {
     return json(req, { error: { code: "INVALID_INSTRUMENT", message: "The requested instrument is invalid or unavailable." } }, 400);
   }
+  if ("instruments" in request && request.instruments.some((instrument) => instrument.provider !== request.provider)) {
+    return json(req, { error: { code: "INVALID_INSTRUMENT", message: "The requested instrument is invalid or unavailable." } }, 400);
+  }
 
   try {
     await authorizeMarketDataAccount(customer.accessToken, customer.userId, request.account_id, request.provider);
@@ -156,6 +161,13 @@ export async function POST(req: Request): Promise<NextResponse> {
         data = normalizeMarketQuote(quote);
         break;
       }
+      case "getQuotes":
+        data = (await provider.getQuotes(request.instruments as MarketInstrument[]))
+          .map((quote) => {
+            if (quote.provider !== request.provider) throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
+            return normalizeMarketQuote(quote);
+          });
+        break;
       case "getOptionChain": {
         const optionChain = await provider.getOptionChain(request.underlying, request.expiry);
         if (optionChain.provider !== request.provider) throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");

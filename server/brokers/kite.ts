@@ -17,7 +17,7 @@ const KITE_API = "https://api.kite.trade";
 const KITE_EXCHANGES = new Set(["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX"]);
 const INTERVALS = new Set(["minute", "3minute", "5minute", "10minute", "15minute", "30minute", "60minute", "day"]);
 const OPTION_UNDERLYINGS: Record<string, string[]> = { NIFTY: ["NIFTY", "NIFTY 50"], BANKNIFTY: ["BANKNIFTY", "NIFTY BANK"], FINNIFTY: ["FINNIFTY", "NIFTY FIN SERVICE", "NIFTY FINANCIAL SERVICES"], MIDCPNIFTY: ["MIDCPNIFTY", "NIFTY MID SELECT", "NIFTY MIDCAP 50"] };
-const OPTION_QUOTE_BATCH_SIZE = 75;
+const KITE_QUOTE_BATCH_SIZE = 75;
 
 function credential(credentials: BrokerCredentialMap, ...keys: string[]): string {
   for (const key of keys) {
@@ -99,6 +99,53 @@ export class KiteMarketDataProvider implements MarketDataProvider {
     };
   }
 
+  async getQuotes(instruments: MarketInstrument[]): Promise<MarketQuote[]> {
+    if (instruments.length === 0 || instruments.length > 1000) {
+      throw new MarketDataProviderError("kite", "INVALID_REQUEST");
+    }
+    for (const instrument of instruments) this.validateInstrument(instrument);
+
+    const quotes: MarketQuote[] = [];
+    for (let offset = 0; offset < instruments.length; offset += KITE_QUOTE_BATCH_SIZE) {
+      const batch = instruments.slice(offset, offset + KITE_QUOTE_BATCH_SIZE);
+      const keys = batch.map((instrument) => `${instrument.exchange}:${instrument.tradingSymbol}`);
+      const query = new URLSearchParams();
+      keys.forEach((key) => query.append("i", key));
+      const payload = await this.readJson(await this.fetcher(`${KITE_API}/quote?${query}`, {
+        headers: this.headers(),
+        cache: "no-store",
+      }));
+
+      for (let index = 0; index < batch.length; index++) {
+        const instrument = batch[index];
+        const quote = payload.data?.[keys[index]];
+        const ltp = numeric(quote?.last_price);
+        if (ltp === null) continue;
+        const quoteTimestamp = quote.timestamp ?? quote.last_trade_time;
+        if (typeof quoteTimestamp !== "string" && typeof quoteTimestamp !== "number") continue;
+        const previousClose = numeric(quote.ohlc?.close);
+        const change = previousClose === null ? null : ltp - previousClose;
+        quotes.push({
+          provider: "kite",
+          symbol: instrument.symbol,
+          tradingSymbol: instrument.tradingSymbol,
+          exchange: instrument.exchange,
+          ltp,
+          open: numeric(quote.ohlc?.open),
+          high: numeric(quote.ohlc?.high),
+          low: numeric(quote.ohlc?.low),
+          previousClose,
+          change,
+          changePercent: previousClose && change !== null ? (change / previousClose) * 100 : null,
+          volume: numeric(quote.volume),
+          openInterest: numeric(quote.oi),
+          timestamp: String(quoteTimestamp),
+        });
+      }
+    }
+    return quotes;
+  }
+
   async getHistoricalCandles(
     instrument: MarketInstrument,
     interval: string,
@@ -137,8 +184,8 @@ export class KiteMarketDataProvider implements MarketDataProvider {
     if (!selectedExpiry) throw new MarketDataProviderError("kite", "INVALID_INSTRUMENT");
     const selectedContracts = contracts.filter((instrument) => instrument.expiryDate === selectedExpiry);
     const quoteRows: Array<[MarketInstrument, Record<string, unknown>]> = [];
-    for (let offset = 0; offset < selectedContracts.length; offset += OPTION_QUOTE_BATCH_SIZE) {
-      const batch = selectedContracts.slice(offset, offset + OPTION_QUOTE_BATCH_SIZE);
+    for (let offset = 0; offset < selectedContracts.length; offset += KITE_QUOTE_BATCH_SIZE) {
+      const batch = selectedContracts.slice(offset, offset + KITE_QUOTE_BATCH_SIZE);
       const query = new URLSearchParams();
       for (const instrument of batch) query.append("i", `${instrument.exchange}:${instrument.tradingSymbol}`);
       const payload = await this.readJson(await this.fetcher(`${KITE_API}/quote?${query}`, { headers: this.headers(), cache: "no-store" }));
