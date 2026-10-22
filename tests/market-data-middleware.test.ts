@@ -41,6 +41,19 @@ describe("Main Terminal API CORS middleware", () => {
     expect(response.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
   });
 
+  it("permits the configured Main Terminal origin on the realtime ticket API", async () => {
+    process.env.MAIN_TERMINAL_ORIGINS = "https://charts.fundedwealth.com";
+
+    const response = await middleware(new NextRequest("https://terminal.test/api/terminal/realtime-ticket", {
+      method: "OPTIONS",
+      headers: { origin: "https://charts.fundedwealth.com" },
+    }));
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://charts.fundedwealth.com");
+    expect(response.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+  });
+
   it.each(["system-health", "watchlists"])(
     "permits the configured Main Terminal origin on the %s API",
     async (endpoint) => {

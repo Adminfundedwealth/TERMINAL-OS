@@ -15,6 +15,7 @@ function applyApiCors(request: NextRequest, response: NextResponse): NextRespons
     "/api/terminal/market-data",
     "/api/terminal/market-data/stream",
     "/api/terminal/orders",
+    "/api/terminal/realtime-ticket",
     "/api/terminal/system-health",
     "/api/terminal/watchlists",
   ].includes(request.nextUrl.pathname);
