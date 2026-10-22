@@ -23,18 +23,13 @@ interface EnrichedRow extends BrokerCredentialRow {
   runtime_integrated: boolean;
 }
 
-interface AccountOption {
-  id: string;
-  account_code: string;
-  status: string;
-  broker_provider: string;
+function isGlobalMarketDataProvider(providerId: string): boolean {
+  return providerId === "dhan" || providerId === "zerodha";
 }
 
 export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
   const [tab, setTab] = useState<TabId>("available");
   const [savedRows, setSavedRows] = useState<EnrichedRow[]>([]);
-  const [accounts, setAccounts] = useState<AccountOption[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState("");
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{
     type: "success" | "error";
@@ -56,7 +51,9 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
       const { data } = await res.json();
       const rows = (data ?? []) as EnrichedRow[];
       setSavedRows(rows);
-      if (rows.length > 0) setTab("connected");
+      if (rows.some((row) => !isGlobalMarketDataProvider(row.broker_id) || row.trading_account_id === null)) {
+        setTab("connected");
+      }
     } catch {
       setSavedRows([]);
     } finally {
@@ -64,45 +61,26 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
     }
   }, []);
 
-  const fetchAccounts = useCallback(async () => {
-    try {
-      const res = await fetch("/api/terminal/accounts?status=active&page_size=100");
-      if (!res.ok) { setAccounts([]); return; }
-      const { data } = await res.json();
-      const rows = (data ?? []) as AccountOption[];
-      setAccounts(rows);
-      setSelectedAccountId((current) => rows.some((row) => row.id === current) ? current : rows[0]?.id ?? "");
-    } catch {
-      setAccounts([]);
-      setSelectedAccountId("");
-    }
-  }, []);
+  useEffect(() => { void fetchSaved(); }, [fetchSaved]);
 
-  useEffect(() => { void fetchSaved(); void fetchAccounts(); }, [fetchAccounts, fetchSaved]);
-
-  const isAccountScopedProvider = (providerId: string) => providerId === "dhan" || providerId === "zerodha";
   const visibleRows = savedRows.filter((row) =>
-    !isAccountScopedProvider(row.broker_id) || row.trading_account_id === selectedAccountId
+    !isGlobalMarketDataProvider(row.broker_id) || row.trading_account_id === null
   );
   const savedByBrokerId = new Map(visibleRows.map((r) => [r.broker_id, r]));
   const connectedProviders = BROKER_PROVIDERS.filter((p) => savedByBrokerId.has(p.id));
   const availableProviders = BROKER_PROVIDERS.filter((p) => !savedByBrokerId.has(p.id));
-  const unassignedMarketCredentialCount = savedRows.filter((row) =>
-    isAccountScopedProvider(row.broker_id) && !row.trading_account_id
+  const accountScopedCredentialCount = savedRows.filter((row) =>
+    isGlobalMarketDataProvider(row.broker_id) && row.trading_account_id !== null
   ).length;
 
   async function handleSave(provider: BrokerProviderDef, credentials: Record<string, string>, label: string) {
-    if (isAccountScopedProvider(provider.id) && !selectedAccountId) {
-      throw new Error("Select an active trading account before saving Dhan or Kite credentials.");
-    }
     const res = await fetch("/api/terminal/broker", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         broker_id: provider.id,
-        label,
+        label: isGlobalMarketDataProvider(provider.id) ? `FundedWealth Global ${provider.name} Market Data` : label,
         credentials,
-        ...(isAccountScopedProvider(provider.id) ? { trading_account_id: selectedAccountId } : {}),
       }),
     });
     const j = await res.json();
@@ -173,32 +151,20 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
       <div>
         <h1 className="text-xl font-semibold text-foreground">Broker API Settings</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect your broker accounts for live market data and trading. Keys are stored securely on the server.
+          Configure FundedWealth global read-only market-data connections. Customer trading-account broker mappings are managed separately.
         </p>
       </div>
 
       {/* Security Notice */}
       <BrokerSecurityNotice />
 
-      <label className="block max-w-lg space-y-1.5 text-sm">
-        <span className="font-medium text-foreground">Trading account for Dhan/Kite credentials</span>
-        <select
-          value={selectedAccountId}
-          onChange={(event) => setSelectedAccountId(event.target.value)}
-          className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
-        >
-          <option value="">Select an active account</option>
-          {accounts.map((account) => (
-            <option key={account.id} value={account.id}>
-              {account.account_code || account.id} · {account.broker_provider}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div role="status" className="rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-sm text-cyan-100">
+        Dhan and Kite keys saved here are global read-only market-data credentials and are not attached to a customer trading account.
+      </div>
 
-      {unassignedMarketCredentialCount > 0 && (
+      {accountScopedCredentialCount > 0 && (
         <div role="status" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-200">
-          {unassignedMarketCredentialCount} legacy Dhan/Kite credential row(s) are unassigned and unavailable to customer market-data requests. Add credentials for a specific active account; legacy rows were not reassigned.
+          {accountScopedCredentialCount} legacy account-scoped Dhan/Kite credential row(s) remain unchanged. Saving a global market-data key does not modify customer trading-account connections.
         </div>
       )}
 

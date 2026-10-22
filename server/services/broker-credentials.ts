@@ -118,47 +118,58 @@ async function getDecryptedCredential(id: string): Promise<{ row: StoredBrokerCr
   }
 }
 
-export async function getMarketDataCredentials(
-  tradingAccountId: string,
+async function findActiveMarketDataCredential(
+  tradingAccountId: string | null | undefined,
   provider: "dhan" | "kite",
-  environment: "production" | "paper" | "sandbox" = "production"
-): Promise<Record<string, string>> {
-  if (!tradingAccountId) throw new MarketDataProviderError(provider, "INVALID_REQUEST");
+  environment: "production" | "paper" | "sandbox"
+): Promise<StoredBrokerCredential | null> {
   const brokerId = provider === "kite" ? "zerodha" : "dhan";
   const db = createServerSupabaseClient();
-  const { data, error } = await db
+
+  const { data: globalCredential, error: globalError } = await db
     .from("broker_credentials")
-    .select("encrypted_credentials")
+    .select(CREDENTIAL_COLUMNS)
+    .eq("broker_id", brokerId)
+    .is("trading_account_id", null)
+    .eq("environment", environment)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (globalError) throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
+  if (globalCredential) return globalCredential as StoredBrokerCredential;
+  if (!tradingAccountId) return null;
+
+  const { data: accountCredential, error: accountError } = await db
+    .from("broker_credentials")
+    .select(CREDENTIAL_COLUMNS)
     .eq("broker_id", brokerId)
     .eq("trading_account_id", tradingAccountId)
     .eq("environment", environment)
     .eq("is_active", true)
     .maybeSingle();
-  if (error) throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
-  if (!data?.encrypted_credentials) throw new MarketDataProviderError(provider, "MISSING_CREDENTIALS");
+  if (accountError) throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
+  return accountCredential as StoredBrokerCredential | null;
+}
+
+export async function getMarketDataCredentials(
+  tradingAccountId: string | null | undefined,
+  provider: "dhan" | "kite",
+  environment: "production" | "paper" | "sandbox" = "production"
+): Promise<Record<string, string>> {
+  const credential = await findActiveMarketDataCredential(tradingAccountId, provider, environment);
+  if (!credential?.encrypted_credentials) throw new MarketDataProviderError(provider, "MISSING_CREDENTIALS");
   try {
-    return await decryptCredentials(data.encrypted_credentials);
+    return await decryptCredentials(credential.encrypted_credentials);
   } catch {
     throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
   }
 }
 
 export async function getMarketDataCredentialStatus(
-  tradingAccountId: string,
+  tradingAccountId: string | null | undefined,
   provider: "dhan" | "kite",
   environment: "production" | "paper" | "sandbox" = "production"
 ): Promise<{ configured: boolean; is_connected: boolean; last_tested_at: string | null; last_test_result: string | null }> {
-  const brokerId = provider === "kite" ? "zerodha" : "dhan";
-  const db = createServerSupabaseClient();
-  const { data, error } = await db
-    .from("broker_credentials")
-    .select("is_connected, last_tested_at, last_test_result")
-    .eq("trading_account_id", tradingAccountId)
-    .eq("broker_id", brokerId)
-    .eq("environment", environment)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (error) throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
+  const data = await findActiveMarketDataCredential(tradingAccountId, provider, environment);
   return {
     configured: Boolean(data),
     is_connected: data?.is_connected === true,
@@ -172,13 +183,14 @@ export async function getMarketDataCredentialStatus(
 }
 
 export async function recordMarketDataAuthentication(
-  tradingAccountId: string,
+  tradingAccountId: string | null | undefined,
   provider: "dhan" | "kite",
   environment: "production" | "paper" | "sandbox",
   authenticated: boolean,
   result: string
 ): Promise<void> {
-  const brokerId = provider === "kite" ? "zerodha" : "dhan";
+  const credential = await findActiveMarketDataCredential(tradingAccountId, provider, environment);
+  if (!credential) throw new MarketDataProviderError(provider, "MISSING_CREDENTIALS");
   const db = createServerSupabaseClient();
   const { data, error } = await db
     .from("broker_credentials")
@@ -187,14 +199,11 @@ export async function recordMarketDataAuthentication(
       last_tested_at: new Date().toISOString(),
       last_test_result: result,
     })
-    .eq("trading_account_id", tradingAccountId)
-    .eq("broker_id", brokerId)
-    .eq("environment", environment)
-    .eq("is_active", true)
+    .eq("id", credential.id)
     .select("id")
     .maybeSingle();
   if (error) throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
-  if (!data) throw new MarketDataProviderError(provider, "MISSING_CREDENTIALS");
+  if (!data) throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
 }
 
 export async function createBrokerCredential(
@@ -214,10 +223,6 @@ export async function createBrokerCredential(
        !(payload.credentials.access_token || payload.credentials.accessToken))) {
     throw new Error("Kite credentials require an API key and access token.");
   }
-  if ((payload.broker_id === "dhan" || payload.broker_id === "zerodha") && !payload.trading_account_id) {
-    throw new Error("An authorized trading account is required for market-data credentials.");
-  }
-
   const db = createServerSupabaseClient();
   if (payload.trading_account_id) {
     const { data: account, error: accountError } = await db

@@ -57,6 +57,7 @@ export interface BrokerProviderDef {
 
 export interface BrokerCredentialRow {
   id: string;
+  /** Null denotes a Founder-managed global market-data credential. */
   trading_account_id: string | null;
   broker_id: BrokerId;
   label: string;
@@ -97,6 +98,7 @@ export interface BrokerConnectionRow {
 // -------------------------------------------------------
 
 export interface SaveBrokerCredentialsPayload {
+  /** Omit to create a global market-data credential. */
   trading_account_id?: string;
   broker_id: BrokerId;
   label?: string;

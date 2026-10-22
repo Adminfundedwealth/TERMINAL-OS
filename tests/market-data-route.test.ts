@@ -107,7 +107,7 @@ beforeEach(() => {
   mocks.getMarketDataCredentialStatus.mockResolvedValue({ configured: true, is_connected: true, last_tested_at: "2026-09-29T00:00:00.000Z", last_test_result: "Authentication successful." });
 });
 
-describe("account-scoped market-data API", () => {
+describe("authenticated global market-data API", () => {
   it("allows CORS only for explicitly configured Main Terminal origins", async () => {
     const previousOrigins = process.env.MAIN_TERMINAL_ORIGINS;
     process.env.MAIN_TERMINAL_ORIGINS = "https://main.example.test,https://staging.example.test";
@@ -136,11 +136,22 @@ describe("account-scoped market-data API", () => {
     expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
   });
 
-  it("rejects missing account context", async () => {
+  it("authenticates the global provider without a customer trading account", async () => {
     const response = await POST(post({ provider: "dhan", operation: "authenticate" }));
 
-    expect(response.status).toBe(400);
-    expect(mocks.createStoredMarketDataProvider).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
+    expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith(undefined, "dhan", "production");
+    expect(mocks.recordMarketDataAuthentication).toHaveBeenCalledWith(undefined, "dhan", "production", true, "Authentication successful.");
+  });
+
+  it("serves global instrument search without a customer trading account", async () => {
+    const response = await POST(post({ provider: "dhan", operation: "searchInstruments", query: "NIFTY" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
+    expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith(undefined, "dhan", "production");
+    expect((await responseBody(response)).data[0]).toMatchObject({ provider: "dhan", symbol: "NIFTY" });
   });
 
   it("rejects another customer's account before provider construction", async () => {
@@ -161,13 +172,15 @@ describe("account-scoped market-data API", () => {
     expect(mocks.createStoredMarketDataProvider).not.toHaveBeenCalled();
   });
 
-  it("rejects a provider that does not match the authorized account", async () => {
-    mocks.authorizeMarketDataAccount.mockRejectedValue(new MarketDataProviderError("kite", "INVALID_PROVIDER_ACCOUNT"));
+  it("allows a market-data provider that differs from the trading account broker", async () => {
+    mocks.authorizeMarketDataAccount.mockResolvedValue({ ...account, broker_provider: "zerodha" });
+    provider.authenticate.mockResolvedValueOnce({ authenticated: true });
 
-    const response = await POST(post({ account_id: "11111111-1111-4111-8111-111111111111", provider: "kite", operation: "authenticate" }));
+    const response = await POST(post({ account_id: account.id, provider: "dhan", operation: "authenticate" }));
 
-    expect(response.status).toBe(409);
-    expect(mocks.createStoredMarketDataProvider).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeMarketDataAccount).toHaveBeenCalledWith("customer-jwt", "customer-1", account.id, "dhan");
+    expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith(account.id, "dhan", "production");
   });
 
   it.each([["dhan", "production"], ["kite", "paper"]] as const)("routes authorized %s %s requests to its account/environment provider", async (broker: "dhan" | "kite", environment: "production" | "paper") => {
@@ -313,14 +326,15 @@ describe("account-scoped market-data API", () => {
     expect(serialized).not.toContain("api_secret");
   });
 
-  it("returns provider status only for the authorized account/provider pair", async () => {
-    const response = await GET(new Request("https://terminal.test/api/terminal/market-data?account_id=11111111-1111-4111-8111-111111111111&provider=dhan&environment=paper", {
+  it("returns global provider status without requiring a trading account", async () => {
+    const response = await GET(new Request("https://terminal.test/api/terminal/market-data?provider=dhan&environment=paper", {
       headers: { authorization: "Bearer customer-jwt" },
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.getMarketDataCredentialStatus).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111", "dhan", "paper");
-    expect((await responseBody(response)).data).toMatchObject({ account_id: "11111111-1111-4111-8111-111111111111", provider: "dhan", environment: "paper", configured: true, is_connected: true });
+    expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
+    expect(mocks.getMarketDataCredentialStatus).toHaveBeenCalledWith(undefined, "dhan", "paper");
+    expect((await responseBody(response)).data).toMatchObject({ provider: "dhan", environment: "paper", configured: true, is_connected: true });
   });
 
   it("does not return or log bearer tokens or broker credential material", async () => {

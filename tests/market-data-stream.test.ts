@@ -51,7 +51,7 @@ beforeEach(() => {
   mocks.createStoredMarketDataProvider.mockResolvedValue(provider);
 });
 
-describe("account-scoped realtime stream", () => {
+describe("authenticated realtime market-data stream", () => {
   it("authorizes the account and streams normalized quotes from the provider adapter boundary", async () => {
     const controller = new AbortController();
     const request = new Request(`https://terminal.test/api/terminal/market-data/stream?account_id=${accountId}&provider=kite&environment=paper&symbols=NIFTY,BANKNIFTY`, {
@@ -95,5 +95,34 @@ describe("account-scoped realtime stream", () => {
     expect(response.status).toBe(401);
     expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
     expect(mocks.createStoredMarketDataProvider).not.toHaveBeenCalled();
+  });
+
+  it("streams global market data without an account binding", async () => {
+    const controller = new AbortController();
+    const request = new Request("https://terminal.test/api/terminal/market-data/stream?provider=kite&symbols=NIFTY", {
+      headers: { authorization: "Bearer mock-jwt", origin: "https://charts.fundedwealth.com" },
+      signal: controller.signal,
+    });
+
+    const response = await GET(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
+    expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith(undefined, "kite", "production");
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let body = "";
+    while (!body.includes("event: quote")) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      body += decoder.decode(value, { stream: true });
+    }
+    controller.abort();
+    await reader.cancel().catch(() => undefined);
+
+    expect(body).toContain("event: ready");
+    expect(body).toContain('"provider":"kite"');
+    expect(body).not.toContain('"account_id"');
   });
 });

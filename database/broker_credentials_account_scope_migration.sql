@@ -1,5 +1,6 @@
 -- Account-scope the existing broker credential table; this does not create a table.
--- Legacy unscoped rows are intentionally not assigned to customer accounts.
+-- NULL trading_account_id identifies a Founder-managed global market-data credential.
+-- Existing unscoped rows are not assigned to customer accounts.
 
 begin;
 
@@ -20,7 +21,7 @@ create unique index if not exists idx_broker_credentials_one_active_per_account
   on public.broker_credentials (trading_account_id, broker_id, environment)
   where is_active = true and trading_account_id is not null;
 
--- Legacy/unassigned active credentials have a separate one-global-row limit.
+-- Global active market-data credentials have a separate one-global-row limit.
 create unique index if not exists idx_broker_credentials_one_global_active
   on public.broker_credentials ((trading_account_id is null))
   where is_active = true and trading_account_id is null;

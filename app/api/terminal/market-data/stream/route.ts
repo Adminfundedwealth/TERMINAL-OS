@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const StreamQuerySchema = z.object({
-  account_id: z.string().uuid(),
+  account_id: z.string().uuid().optional(),
   provider: z.enum(["dhan", "kite"]),
   environment: z.enum(["production", "paper", "sandbox"]).default("production"),
   symbols: z.string().min(1).max(1000).transform((value) => [...new Set(value.split(",").map((symbol) => symbol.trim()).filter(Boolean))]).refine((symbols) => symbols.length > 0 && symbols.length <= 25 && symbols.every((symbol) => symbol.length <= 100)),
@@ -44,7 +44,9 @@ export async function GET(req: Request): Promise<Response> {
   const subscription = parsed.data;
 
   try {
-    await authorizeMarketDataAccount(customer.accessToken, customer.userId, subscription.account_id, subscription.provider);
+    if (subscription.account_id) {
+      await authorizeMarketDataAccount(customer.accessToken, customer.userId, subscription.account_id, subscription.provider);
+    }
     const provider = await createStoredMarketDataProvider(subscription.account_id, subscription.provider, subscription.environment);
     const instruments = (await Promise.all(subscription.symbols.map((symbol) => provider.searchInstruments(symbol))))
       .flat()
@@ -64,14 +66,14 @@ export async function GET(req: Request): Promise<Response> {
         const send = (event: string, data: unknown) => {
           try { controller.enqueue(frame(event, data)); } catch { /* Client disconnected. */ }
         };
-        send("ready", { account_id: subscription.account_id, provider: subscription.provider, environment: subscription.environment, symbols: [...instrumentBySymbol.keys()] });
+        send("ready", { ...(subscription.account_id ? { account_id: subscription.account_id } : {}), provider: subscription.provider, environment: subscription.environment, symbols: [...instrumentBySymbol.keys()] });
 
         while (!req.signal.aborted) {
           const timestamp = new Date().toISOString();
           const quotes = await Promise.allSettled([...instrumentBySymbol.entries()].map(async ([symbol, instrument]) => {
             const quote = await provider.getQuote(instrument);
             if (quote.provider !== subscription.provider) throw new MarketDataProviderError(subscription.provider, "INVALID_INSTRUMENT");
-            return { account_id: subscription.account_id, provider: subscription.provider, environment: subscription.environment, symbol, quote: normalizeMarketQuote(quote) };
+            return { ...(subscription.account_id ? { account_id: subscription.account_id } : {}), provider: subscription.provider, environment: subscription.environment, symbol, quote: normalizeMarketQuote(quote) };
           }));
           for (const result of quotes) {
             if (result.status === "fulfilled") send("quote", result.value);

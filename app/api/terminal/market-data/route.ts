@@ -33,12 +33,12 @@ const InstrumentSchema = z.object({
 });
 
 const RequestSchema = z.discriminatedUnion("operation", [
-  z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("authenticate") }),
-  z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("searchInstruments"), query: z.string().trim().min(1).max(100) }),
-  z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getQuote"), instrument: InstrumentSchema }),
-  z.object({ account_id: z.string().uuid(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getOptionChain"), underlying: z.string().trim().min(1).max(32), expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
+  z.object({ account_id: z.string().uuid().optional(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("authenticate") }),
+  z.object({ account_id: z.string().uuid().optional(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("searchInstruments"), query: z.string().trim().min(1).max(100) }),
+  z.object({ account_id: z.string().uuid().optional(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getQuote"), instrument: InstrumentSchema }),
+  z.object({ account_id: z.string().uuid().optional(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getOptionChain"), underlying: z.string().trim().min(1).max(32), expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
   z.object({
-    account_id: z.string().uuid(),
+    account_id: z.string().uuid().optional(),
     provider: z.enum(["dhan", "kite"]),
     environment: z.enum(["production", "paper", "sandbox"]).default("production"),
     operation: z.literal("getHistoricalCandles"),
@@ -50,7 +50,7 @@ const RequestSchema = z.discriminatedUnion("operation", [
 ]);
 
 const StatusQuerySchema = z.object({
-  account_id: z.string().uuid(),
+  account_id: z.string().uuid().optional(),
   provider: z.enum(["dhan", "kite"]),
   environment: z.enum(["production", "paper", "sandbox"]).default("production"),
 });
@@ -90,20 +90,22 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   try {
-    await authorizeMarketDataAccount(
-      customer.accessToken,
-      customer.userId,
-      parsed.data.account_id,
-      parsed.data.provider
-    );
+    if (parsed.data.account_id) {
+      await authorizeMarketDataAccount(
+        customer.accessToken,
+        customer.userId,
+        parsed.data.account_id,
+        parsed.data.provider
+      );
+    }
     const status = await getMarketDataCredentialStatus(parsed.data.account_id, parsed.data.provider, parsed.data.environment);
-    return json(req, { data: { account_id: parsed.data.account_id, provider: parsed.data.provider, environment: parsed.data.environment, ...status } });
+    return json(req, { data: { ...(parsed.data.account_id ? { account_id: parsed.data.account_id } : {}), provider: parsed.data.provider, environment: parsed.data.environment, ...status } });
   } catch (error) {
     if (error instanceof MarketDataProviderError) {
       serverLog("warn", "market_data", "status_request_failed", {
         error_code: error.code,
         result: parsed.data.provider,
-        accountId: parsed.data.account_id,
+        accountId: parsed.data.account_id ?? null,
       });
       return json(req, { error: { code: error.code, message: error.message } }, errorStatus(error));
     }
@@ -136,7 +138,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    await authorizeMarketDataAccount(customer.accessToken, customer.userId, request.account_id, request.provider);
+    if (request.account_id) {
+      await authorizeMarketDataAccount(customer.accessToken, customer.userId, request.account_id, request.provider);
+    }
     const provider = await createStoredMarketDataProvider(request.account_id, request.provider, request.environment);
     let data: unknown;
     switch (request.operation) {
@@ -187,7 +191,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       serverLog("warn", "market_data", "provider_request_failed", {
         error_code: error.code,
         result: error.provider,
-        accountId: request.account_id,
+        accountId: request.account_id ?? null,
       });
       return json(req,
         { error: { code: error.code, message: error.message } },

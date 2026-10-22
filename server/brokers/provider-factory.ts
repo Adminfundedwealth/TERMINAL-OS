@@ -5,7 +5,7 @@ import { KiteMarketDataProvider } from "./kite";
 import type { MarketDataProvider, MarketDataProviderId } from "./types";
 
 export async function createStoredMarketDataProvider(
-  tradingAccountId: string,
+  tradingAccountId: string | null | undefined,
   provider: MarketDataProviderId,
   environment: "production" | "paper" | "sandbox" = "production"
 ): Promise<MarketDataProvider> {
