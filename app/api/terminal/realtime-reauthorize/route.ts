@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { verifyRealtimeTicket } from "@/server/brokers/realtime-ticket";
 import { getMarketDataCredentials } from "@/server/services/broker-credentials";
+import { getActiveCentralMarketDataCredentials } from "@/server/services/broker-connections";
 
 const RequestSchema = z.object({ ticket: z.string().min(1).max(2048) }).strict();
 
@@ -32,7 +33,12 @@ export async function POST(req: Request): Promise<NextResponse> {
       account.status?.toLowerCase() !== "active" || account.is_active !== true) {
       return NextResponse.json({ authorized: false }, { status: 403 });
     }
-    const credentials = await getMarketDataCredentials(claims.account_id, claims.provider, claims.environment);
+    const credentials = claims.provider === "dhan"
+      ? await getActiveCentralMarketDataCredentials({
+        broker_id: "dhan",
+        environment: claims.environment,
+      })
+      : await getMarketDataCredentials(claims.account_id, claims.provider, claims.environment);
     return NextResponse.json({ authorized: true, credentials }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ authorized: false }, { status: 403 });

@@ -13,6 +13,10 @@ import {
   updateBrokerCredential,
   deleteBrokerCredential,
 } from "@/server/services/broker-credentials";
+import {
+  getCentralBrokerConnectionById,
+  updateCentralBrokerConnection,
+} from "@/server/services/broker-connections";
 import { writeActivityLog, serverLog } from "@/lib/logger";
 import { z } from "zod";
 
@@ -30,6 +34,9 @@ function getId(req: Request): string {
 export const GET = withAuth(PERMISSIONS.BROKER_VIEW, async ({ req }) => {
   try {
     const id = getId(req);
+    const centralRecord = await getCentralBrokerConnectionById(id);
+    if (centralRecord) return NextResponse.json({ data: centralRecord });
+
     const record = await getBrokerCredentialById(id);
     if (!record) {
       return NextResponse.json({ error: { code: "NOT_FOUND", message: "Credential not found." } }, { status: 404 });
@@ -50,6 +57,24 @@ export const PUT = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee })
         { error: { code: "VALIDATION_ERROR", message: "Invalid request data." } },
         { status: 400 }
       );
+    }
+
+    const centralRecord = await getCentralBrokerConnectionById(id);
+    if (centralRecord) {
+      const record = await updateCentralBrokerConnection(id, parsed.data, employee.id);
+      if (!record) {
+        return NextResponse.json({ error: { code: "NOT_FOUND", message: "FundedWealth broker connection not found." } }, { status: 404 });
+      }
+      await writeActivityLog({
+        employee_id: employee.id,
+        action: "BROKER_CREDENTIALS_UPDATED",
+        module: "broker",
+        resource: "broker_connections",
+        resource_id: id,
+        result: "SUCCESS",
+        metadata: { updated_fields: Object.keys(parsed.data).filter((key) => key !== "credentials"), broker_id: record.broker_id },
+      });
+      return NextResponse.json({ data: record });
     }
 
     const record = await updateBrokerCredential(id, parsed.data, employee.id);

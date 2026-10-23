@@ -10,6 +10,10 @@ import {
   testBrokerConnection,
   getBrokerCredentialById,
 } from "@/server/services/broker-credentials";
+import {
+  getCentralBrokerConnectionById,
+  testCentralBrokerConnection,
+} from "@/server/services/broker-connections";
 import { writeActivityLog } from "@/lib/logger";
 
 function getId(req: Request): string {
@@ -21,6 +25,37 @@ function getId(req: Request): string {
 export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }) => {
   try {
     const id = getId(req);
+    const centralRecord = await getCentralBrokerConnectionById(id);
+    if (centralRecord) {
+      const result = await testCentralBrokerConnection(id, {
+        broker_id: centralRecord.broker_id,
+        environment: centralRecord.environment as "production" | "paper" | "sandbox",
+      }, employee.id);
+      await writeActivityLog({
+        employee_id: employee.id,
+        action: "BROKER_CONNECTION_TEST",
+        module: "broker",
+        resource: "broker_connections",
+        resource_id: id,
+        result: result.success ? "SUCCESS" : "FAILED",
+        metadata: {
+          broker_id: centralRecord.broker_id,
+          environment: centralRecord.environment,
+          test_result: result.message,
+          implemented: result.implemented,
+        },
+      });
+      return NextResponse.json({
+        data: {
+          success: result.success,
+          broker_id: centralRecord.broker_id,
+          message: result.message,
+          tested_at: new Date().toISOString(),
+          implemented: result.implemented,
+        },
+      });
+    }
+
     const record = await getBrokerCredentialById(id);
 
     if (!record) {

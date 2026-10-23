@@ -8,6 +8,7 @@ import {
   getMarketDataCredentialStatus,
   recordMarketDataAuthentication,
 } from "@/server/services/broker-credentials";
+import { getCentralMarketDataCredentialStatus } from "@/server/services/broker-connections";
 import { createStoredMarketDataProvider } from "@/server/brokers/provider-factory";
 import { MarketDataProviderError } from "@/server/brokers/provider-error";
 import {
@@ -98,7 +99,11 @@ export async function GET(req: Request): Promise<NextResponse> {
         parsed.data.provider
       );
     }
-    const status = await getMarketDataCredentialStatus(parsed.data.account_id, parsed.data.provider, parsed.data.environment);
+    const status = parsed.data.provider === "dhan"
+      ? await getCentralMarketDataCredentialStatus({ broker_id: "dhan", environment: parsed.data.environment })
+      : parsed.data.account_id
+        ? await getMarketDataCredentialStatus(parsed.data.account_id, parsed.data.provider, parsed.data.environment)
+        : { configured: false, is_connected: false, last_tested_at: null, last_test_result: null };
     return json(req, { data: { ...(parsed.data.account_id ? { account_id: parsed.data.account_id } : {}), provider: parsed.data.provider, environment: parsed.data.environment, ...status } });
   } catch (error) {
     if (error instanceof MarketDataProviderError) {
@@ -146,7 +151,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     switch (request.operation) {
       case "authenticate":
         data = await provider.authenticate();
-        await recordMarketDataAuthentication(request.account_id, request.provider, request.environment, true, "Authentication successful.");
+        if (request.provider !== "dhan" && request.account_id) {
+          await recordMarketDataAuthentication(request.account_id, request.provider, request.environment, true, "Authentication successful.");
+        }
         break;
       case "searchInstruments":
         data = (await provider.searchInstruments(request.query)).map((instrument) => {
@@ -181,7 +188,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     return json(req, { data });
   } catch (error) {
     if (error instanceof MarketDataProviderError) {
-      if (request.operation === "authenticate") {
+      if (request.operation === "authenticate" && request.provider !== "dhan" && request.account_id) {
         try {
           await recordMarketDataAuthentication(request.account_id, request.provider, request.environment, false, error.message);
         } catch {

@@ -3,12 +3,14 @@ import { createRouteHandlerSupabaseClient } from "@/lib/supabase/route-handler-c
 import { MarketDataProviderError } from "@/server/brokers/provider-error";
 import type { MarketDataProviderId } from "@/server/brokers/types";
 import { getMarketDataCredentials } from "@/server/services/broker-credentials";
+import { getActiveCentralMarketDataCredentials } from "@/server/services/broker-connections";
 
 export interface AuthorizedMarketDataAccount {
   id: string;
   owner_user_id: string;
   status: string;
   is_active: boolean;
+  broker_provider?: string | null;
 }
 
 export async function authorizeMarketDataAccount(
@@ -59,11 +61,16 @@ export async function authorizeRealtimeMarketDataSubscription(
     subscription.account_id,
     subscription.provider
   );
-  const credentials = await getMarketDataCredentials(
-    account.id,
-    subscription.provider,
-    subscription.environment
-  );
+  const credentials = subscription.provider === "dhan"
+    ? await getActiveCentralMarketDataCredentials({
+      broker_id: "dhan",
+      environment: subscription.environment,
+    })
+    : await getMarketDataCredentials(
+      account.id,
+      subscription.provider,
+      subscription.environment
+    );
   return {
     account,
     provider: subscription.provider,

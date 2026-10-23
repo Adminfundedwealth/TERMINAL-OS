@@ -12,6 +12,10 @@ import {
   getAllBrokerCredentials,
   createBrokerCredential,
 } from "@/server/services/broker-credentials";
+import {
+  createCentralBrokerConnection,
+  getCentralBrokerConnections,
+} from "@/server/services/broker-connections";
 import { writeActivityLog, serverLog } from "@/lib/logger";
 import { BROKER_PROVIDERS } from "@/lib/brokers/provider-definitions";
 import { z } from "zod";
@@ -29,7 +33,14 @@ const SaveSchema = z.object({
 
 export const GET = withAuth(PERMISSIONS.BROKER_VIEW, async ({ employee }) => {
   try {
-    const rows = await getAllBrokerCredentials();
+    const [legacyRows, centralRows] = await Promise.all([
+      getAllBrokerCredentials(),
+      getCentralBrokerConnections(),
+    ]);
+    const rows = [
+      ...legacyRows.filter((row) => row.broker_id !== "dhan"),
+      ...centralRows.filter((row) => row.broker_id === "dhan" && row.environment === "production"),
+    ];
     // Attach provider metadata (name, capabilities etc.) client needs for display
     const enriched = rows.map((row) => {
       const provider = BROKER_PROVIDERS.find((p) => p.id === row.broker_id);
@@ -58,17 +69,25 @@ export const POST = withAuth(PERMISSIONS.BROKER_MANAGE, async ({ req, employee }
       );
     }
 
-    const record = await createBrokerCredential(parsed.data, employee.id);
+    const record = parsed.data.broker_id === "dhan"
+      ? await createCentralBrokerConnection(
+          { broker_id: "dhan", environment: parsed.data.environment ?? "production" },
+          parsed.data.label ?? "FundedWealth Dhan",
+          parsed.data.credentials,
+          employee.id,
+        )
+      : await createBrokerCredential(parsed.data, employee.id);
+    const resource = parsed.data.broker_id === "dhan" ? "broker_connections" : "broker_credentials";
 
     // Audit log — NEVER include credential values
     await writeActivityLog({
       employee_id: employee.id,
       action: "BROKER_CREDENTIALS_CREATED",
       module: "broker",
-      resource: "broker_credentials",
+      resource,
       resource_id: record.id,
       result: "SUCCESS",
-      metadata: { broker_id: parsed.data.broker_id, label: parsed.data.label },
+      metadata: { broker_id: parsed.data.broker_id, label: parsed.data.label, environment: parsed.data.environment ?? "production" },
     });
 
     return NextResponse.json({ data: record }, { status: 201 });

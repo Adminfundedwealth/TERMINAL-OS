@@ -20,6 +20,7 @@ import {
   createCentralBrokerConnection,
   deactivateCentralBrokerConnection,
   getCentralCredentialsForAccount,
+  getActiveCentralMarketDataCredentials,
   testCentralBrokerConnection,
   type BrokerConnectionScope,
 } from "../server/services/broker-connections";
@@ -31,6 +32,7 @@ function chain(result: { data?: unknown; error: null }) {
   query.select = vi.fn(() => query);
   query.eq = vi.fn(() => query);
   query.is = vi.fn(() => query);
+  query.not = vi.fn(() => query);
   query.maybeSingle = vi.fn(async () => result);
   query.insert = vi.fn(() => query);
   query.update = vi.fn(() => query);
@@ -93,6 +95,39 @@ describe("FundedWealth central broker connections", () => {
       updated_by: "employee-1",
     }));
     expect(query.eq).toHaveBeenCalledWith("id", "central-connection");
+  });
+
+  it("resolves only the active, connected, tested Founder Dhan production connection", async () => {
+    const query = chain({ data: { encrypted_credentials: "central-ciphertext" }, error: null });
+    const db = { from: vi.fn(() => query) };
+    vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
+
+    const credentials = await getActiveCentralMarketDataCredentials({
+      broker_id: "dhan",
+      environment: "production",
+    });
+
+    expect(db.from).toHaveBeenCalledWith("broker_connections");
+    expect(query.eq).toHaveBeenCalledWith("broker_id", "dhan");
+    expect(query.eq).toHaveBeenCalledWith("environment", "production");
+    expect(query.eq).toHaveBeenCalledWith("is_active", true);
+    expect(query.eq).toHaveBeenCalledWith("is_connected", true);
+    expect(query.eq).toHaveBeenCalledWith("connection_status", "connected");
+    expect(query.not).toHaveBeenCalledWith("last_tested_at", "is", null);
+    expect(credentials).toEqual({ api_key: "masked-test-value", access_token: "masked-test-value" });
+  });
+
+  it("does not fall back to an account binding when the global Dhan credential is inactive", async () => {
+    const query = chain({ data: null, error: null });
+    const db = { from: vi.fn(() => query) };
+    vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
+
+    await expect(getActiveCentralMarketDataCredentials({
+      broker_id: "dhan",
+      environment: "production",
+    })).rejects.toMatchObject({ code: "MISSING_CREDENTIALS" });
+    expect(db.from).toHaveBeenCalledTimes(1);
+    expect(db.from).toHaveBeenCalledWith("broker_connections");
   });
 
   it("creates encrypted central connection storage without a customer account owner", async () => {

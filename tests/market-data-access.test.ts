@@ -1,13 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createRouteHandlerSupabaseClient, rpc, getMarketDataCredentials } = vi.hoisted(() => ({
+const {
+  createRouteHandlerSupabaseClient,
+  rpc,
+  getMarketDataCredentials,
+  getActiveCentralMarketDataCredentials,
+} = vi.hoisted(() => ({
   createRouteHandlerSupabaseClient: vi.fn(),
   rpc: vi.fn(),
   getMarketDataCredentials: vi.fn(),
+  getActiveCentralMarketDataCredentials: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/route-handler-client", () => ({ createRouteHandlerSupabaseClient }));
 vi.mock("@/server/services/broker-credentials", () => ({ getMarketDataCredentials }));
+vi.mock("@/server/services/broker-connections", () => ({ getActiveCentralMarketDataCredentials }));
 
 import { MarketDataProviderError } from "../server/brokers/provider-error";
 import {
@@ -27,6 +34,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   createRouteHandlerSupabaseClient.mockResolvedValue({ rpc });
   getMarketDataCredentials.mockResolvedValue({ client_id: "server-only-test-value", access_token: "server-only-test-value" });
+  getActiveCentralMarketDataCredentials.mockResolvedValue({ client_id: "founder-client", access_token: "founder-token" });
 });
 
 describe("customer market-data account authorization", () => {
@@ -127,15 +135,30 @@ describe("customer market-data account authorization", () => {
     });
   });
 
-  it("rejects a realtime subscription without an active scoped credential", async () => {
+  it("uses the active Founder Dhan credential for any authorized customer account", async () => {
     rpc.mockResolvedValue({ data: { account }, error: null });
-    getMarketDataCredentials.mockRejectedValueOnce(new MarketDataProviderError("dhan", "MISSING_CREDENTIALS"));
 
-    await expect(authorizeRealtimeMarketDataSubscription("customer-jwt", "customer-1", {
+    const result = await authorizeRealtimeMarketDataSubscription("customer-jwt", "customer-1", {
       account_id: "account-1",
       provider: "dhan",
       environment: "production",
-    })).rejects.toMatchObject({ code: "MISSING_CREDENTIALS" });
-    expect(getMarketDataCredentials).toHaveBeenCalledWith("account-1", "dhan", "production");
+    });
+
+    expect(getActiveCentralMarketDataCredentials).toHaveBeenCalledWith({ broker_id: "dhan", environment: "production" });
+    expect(getMarketDataCredentials).not.toHaveBeenCalled();
+    expect(result.credentials).toEqual({ client_id: "founder-client", access_token: "founder-token" });
+  });
+
+  it("does not require an account to be mapped to Dhan for global market data", async () => {
+    rpc.mockResolvedValue({ data: { account: { ...account, broker_provider: "paper" } }, error: null });
+
+    const result = await authorizeRealtimeMarketDataSubscription("customer-jwt", "customer-1", {
+      account_id: "account-1",
+      provider: "dhan",
+      environment: "production",
+    });
+
+    expect(result.account.broker_provider).toBe("paper");
+    expect(getActiveCentralMarketDataCredentials).toHaveBeenCalledWith({ broker_id: "dhan", environment: "production" });
   });
 });

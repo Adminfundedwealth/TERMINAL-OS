@@ -235,6 +235,7 @@ export async function updateCentralBrokerConnection(
   if (payload.label !== undefined) update.label = payload.label;
   if (payload.environment !== undefined) {
     update.environment = payload.environment;
+    update.is_active = false;
     update.is_connected = false;
     update.connection_status = "untested";
     update.last_tested_at = null;
@@ -247,6 +248,7 @@ export async function updateCentralBrokerConnection(
     if (!existing) return null;
     validateCredentials(existing.broker_id, payload.credentials);
     update.encrypted_credentials = await encryptCredentials(payload.credentials);
+    update.is_active = false;
     update.is_connected = false;
     update.connection_status = "untested";
     update.last_tested_at = null;
@@ -364,6 +366,54 @@ export async function testCentralBrokerConnection(
     .eq("environment", scope.environment);
   if (updateError) return { success: false, message: "Broker connection status could not be saved.", implemented };
   return { success, message, implemented };
+}
+
+export async function getActiveCentralMarketDataCredentials(
+  scope: BrokerConnectionScope,
+): Promise<BrokerCredentialMap> {
+  const provider = scope.broker_id === "zerodha" ? "kite" : "dhan";
+  const db = createServerSupabaseClient();
+  const { data, error } = await db
+    .from("broker_connections")
+    .select("encrypted_credentials")
+    .eq("broker_id", scope.broker_id)
+    .eq("environment", scope.environment)
+    .eq("is_active", true)
+    .eq("is_connected", true)
+    .eq("connection_status", "connected")
+    .not("last_tested_at", "is", null)
+    .maybeSingle();
+  if (error || !data?.encrypted_credentials) {
+    throw new MarketDataProviderError(provider, "MISSING_CREDENTIALS");
+  }
+  try {
+    return await decryptCredentials(data.encrypted_credentials);
+  } catch {
+    throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
+  }
+}
+
+export async function getCentralMarketDataCredentialStatus(
+  scope: BrokerConnectionScope,
+): Promise<{ configured: boolean; is_connected: boolean; last_tested_at: string | null; last_test_result: string | null }> {
+  const db = createServerSupabaseClient();
+  const { data, error } = await db
+    .from("broker_connections")
+    .select("is_active, is_connected, connection_status, last_tested_at")
+    .eq("broker_id", scope.broker_id)
+    .eq("environment", scope.environment)
+    .maybeSingle();
+  if (error) throw new MarketDataProviderError(scope.broker_id === "zerodha" ? "kite" : "dhan", "CREDENTIAL_STORAGE_ERROR");
+  const connected = data?.is_active === true
+    && data.is_connected === true
+    && data.connection_status === "connected"
+    && Boolean(data.last_tested_at);
+  return {
+    configured: Boolean(data),
+    is_connected: connected,
+    last_tested_at: data?.last_tested_at ?? null,
+    last_test_result: connected ? "Authentication successful." : data?.last_tested_at ? "Authentication failed." : null,
+  };
 }
 
 export async function getCentralCredentialsForAccount(

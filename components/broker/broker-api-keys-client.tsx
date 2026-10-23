@@ -8,7 +8,7 @@ import { ChartDataDownloader } from "@/components/broker/chart-data-downloader";
 import { BrokerProviderCard } from "@/components/broker/broker-provider-card";
 import { HowItWorksSection } from "@/components/broker/how-it-works-section";
 import { BROKER_PROVIDERS } from "@/lib/brokers/provider-definitions";
-import type { BrokerCredentialRow, BrokerProviderDef } from "@/types/broker";
+import type { BrokerConnectionRow, BrokerCredentialRow, BrokerProviderDef } from "@/types/broker";
 import { AlertCircle, Loader2, CheckCircle2 } from "lucide-react";
 
 type TabId = "connected" | "available";
@@ -17,19 +17,24 @@ interface BrokerApiKeysClientProps {
   canManage: boolean;
 }
 
-interface EnrichedRow extends BrokerCredentialRow {
+type EnrichedRow = (BrokerConnectionRow | BrokerCredentialRow) & {
   provider_name: string;
   capabilities: string[];
   runtime_integrated: boolean;
-}
+};
 
-function isGlobalMarketDataProvider(providerId: string): boolean {
-  return providerId === "dhan" || providerId === "zerodha";
+interface AccountOption {
+  id: string;
+  account_code: string;
+  status: string;
+  broker_provider: string;
 }
 
 export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
   const [tab, setTab] = useState<TabId>("available");
   const [savedRows, setSavedRows] = useState<EnrichedRow[]>([]);
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState("");
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{
     type: "success" | "error";
@@ -51,9 +56,7 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
       const { data } = await res.json();
       const rows = (data ?? []) as EnrichedRow[];
       setSavedRows(rows);
-      if (rows.some((row) => !isGlobalMarketDataProvider(row.broker_id) || row.trading_account_id === null)) {
-        setTab("connected");
-      }
+      if (rows.length > 0) setTab("connected");
     } catch {
       setSavedRows([]);
     } finally {
@@ -61,26 +64,46 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
     }
   }, []);
 
-  useEffect(() => { void fetchSaved(); }, [fetchSaved]);
+  const fetchAccounts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/terminal/accounts?status=active&page_size=100");
+      if (!res.ok) { setAccounts([]); return; }
+      const { data } = await res.json();
+      const rows = (data ?? []) as AccountOption[];
+      setAccounts(rows);
+      setSelectedAccountId((current) => rows.some((row) => row.id === current) ? current : rows[0]?.id ?? "");
+    } catch {
+      setAccounts([]);
+      setSelectedAccountId("");
+    }
+  }, []);
 
+  useEffect(() => { void fetchSaved(); void fetchAccounts(); }, [fetchAccounts, fetchSaved]);
+
+  const isAccountScopedProvider = (providerId: string) => providerId === "zerodha";
+  const rowAccountId = (row: EnrichedRow) => "trading_account_id" in row ? row.trading_account_id : null;
   const visibleRows = savedRows.filter((row) =>
-    !isGlobalMarketDataProvider(row.broker_id) || row.trading_account_id === null
+    !isAccountScopedProvider(row.broker_id) || rowAccountId(row) === selectedAccountId
   );
   const savedByBrokerId = new Map(visibleRows.map((r) => [r.broker_id, r]));
   const connectedProviders = BROKER_PROVIDERS.filter((p) => savedByBrokerId.has(p.id));
   const availableProviders = BROKER_PROVIDERS.filter((p) => !savedByBrokerId.has(p.id));
-  const accountScopedCredentialCount = savedRows.filter((row) =>
-    isGlobalMarketDataProvider(row.broker_id) && row.trading_account_id !== null
+  const unassignedMarketCredentialCount = savedRows.filter((row) =>
+    isAccountScopedProvider(row.broker_id) && !rowAccountId(row)
   ).length;
 
   async function handleSave(provider: BrokerProviderDef, credentials: Record<string, string>, label: string) {
+    if (isAccountScopedProvider(provider.id) && !selectedAccountId) {
+      throw new Error("Select an active trading account before saving Kite credentials.");
+    }
     const res = await fetch("/api/terminal/broker", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         broker_id: provider.id,
-        label: isGlobalMarketDataProvider(provider.id) ? `FundedWealth Global ${provider.name} Market Data` : label,
+        label,
         credentials,
+        ...(isAccountScopedProvider(provider.id) ? { trading_account_id: selectedAccountId } : {}),
       }),
     });
     const j = await res.json();
@@ -162,11 +185,27 @@ export function BrokerApiKeysClient({ canManage }: BrokerApiKeysClientProps) {
         Dhan and Kite keys saved here are global read-only market-data credentials and are not attached to a customer trading account.
       </div>
 
-      {accountScopedCredentialCount > 0 && (
+      {unassignedMarketCredentialCount > 0 && (
         <div role="status" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-200">
-          {accountScopedCredentialCount} legacy account-scoped Dhan/Kite credential row(s) remain unchanged. Saving a global market-data key does not modify customer trading-account connections.
+          {unassignedMarketCredentialCount} legacy account-scoped Kite credential row(s) remain unchanged. Saving a global Dhan market-data key does not modify customer trading-account connections.
         </div>
       )}
+
+      <label className="block max-w-lg space-y-1.5 text-sm">
+        <span className="font-medium text-foreground">Trading account for Kite credentials</span>
+        <select
+          value={selectedAccountId}
+          onChange={(event) => setSelectedAccountId(event.target.value)}
+          className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
+        >
+          <option value="">Select an active account</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.account_code || account.id} · {account.broker_provider}
+            </option>
+          ))}
+        </select>
+      </label>
 
       {/* Connection Status - individual service rows with Test button */}
       <DataSourcesPanel />
