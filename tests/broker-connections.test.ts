@@ -21,6 +21,7 @@ import {
   deactivateCentralBrokerConnection,
   getCentralCredentialsForAccount,
   getActiveCentralMarketDataCredentials,
+  reencryptUnboundFounderDhanCredential,
   testCentralBrokerConnection,
   type BrokerConnectionScope,
 } from "../server/services/broker-connections";
@@ -128,6 +129,75 @@ describe("FundedWealth central broker connections", () => {
     })).rejects.toMatchObject({ code: "MISSING_CREDENTIALS" });
     expect(db.from).toHaveBeenCalledTimes(1);
     expect(db.from).toHaveBeenCalledWith("broker_connections");
+  });
+
+  it("re-encrypts only the tested unbound Founder Dhan credential into the global connection", async () => {
+    const targetId = "central-connection";
+    const sourceId = "legacy-global-credential";
+    const targetQuery = chain({ data: { id: targetId, broker_id: "dhan", environment: "production" }, error: null });
+    const sourceQuery = chain({
+      data: {
+        id: sourceId,
+        trading_account_id: null,
+        broker_id: "dhan",
+        label: "FundedWealth Global Dhan Market Data",
+        encrypted_credentials: "legacy-ciphertext",
+        is_active: true,
+        is_connected: true,
+        last_tested_at: "2026-10-23T12:00:00.000Z",
+        environment: "production",
+      },
+      error: null,
+    });
+    const updateQuery = chain({ data: { id: targetId }, error: null });
+    const db = { from: vi.fn()
+      .mockReturnValueOnce(targetQuery)
+      .mockReturnValueOnce(sourceQuery)
+      .mockReturnValueOnce(updateQuery) };
+    vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
+    vi.mocked(decryptCredentials).mockResolvedValueOnce({ client_id: "founder-client", access_token: "founder-token" });
+
+    const result = await reencryptUnboundFounderDhanCredential(targetId, sourceId, "employee-1");
+
+    expect(db.from.mock.calls).toEqual([["broker_connections"], ["broker_credentials"], ["broker_connections"]]);
+    expect(sourceQuery.eq).toHaveBeenCalledWith("label", "FundedWealth Global Dhan Market Data");
+    expect(sourceQuery.is).toHaveBeenCalledWith("trading_account_id", null);
+    expect(sourceQuery.eq).toHaveBeenCalledWith("is_active", true);
+    expect(sourceQuery.eq).toHaveBeenCalledWith("is_connected", true);
+    expect(sourceQuery.not).toHaveBeenCalledWith("last_tested_at", "is", null);
+    expect(updateQuery.update).toHaveBeenCalledWith(expect.objectContaining({
+      encrypted_credentials: "central-ciphertext",
+      is_active: false,
+      is_connected: false,
+      connection_status: "untested",
+      updated_by: "employee-1",
+    }));
+    expect(result).toEqual({ source_id: sourceId, target_id: targetId });
+    expect(JSON.stringify(result)).not.toContain("founder-token");
+  });
+
+  it("refuses to migrate account-scoped Dhan credentials", async () => {
+    const targetQuery = chain({ data: { id: "central-connection", broker_id: "dhan", environment: "production" }, error: null });
+    const sourceQuery = chain({
+      data: {
+        id: "account-credential",
+        trading_account_id: "account-1",
+        broker_id: "dhan",
+        label: "FundedWealth Global Dhan Market Data",
+        encrypted_credentials: "legacy-ciphertext",
+        is_active: true,
+        is_connected: true,
+        last_tested_at: "2026-10-23T12:00:00.000Z",
+        environment: "production",
+      },
+      error: null,
+    });
+    const db = { from: vi.fn().mockReturnValueOnce(targetQuery).mockReturnValueOnce(sourceQuery) };
+    vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
+
+    await expect(reencryptUnboundFounderDhanCredential("central-connection", "account-credential", "employee-1"))
+      .rejects.toThrow("No tested, connected, unbound Founder Dhan credential is available to migrate.");
+    expect(decryptCredentials).not.toHaveBeenCalled();
   });
 
   it("creates encrypted central connection storage without a customer account owner", async () => {

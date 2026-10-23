@@ -266,6 +266,71 @@ export async function updateCentralBrokerConnection(
   return data ? safeRow(data as StoredConnection) : null;
 }
 
+export async function reencryptUnboundFounderDhanCredential(
+  targetId: string,
+  sourceId: string,
+  employeeId: string,
+): Promise<{ source_id: string; target_id: string }> {
+  if (!isEncryptionAvailable()) throw new Error("BROKER_ENCRYPTION_KEY is not configured.");
+
+  const db = createServerSupabaseClient();
+  const { data: target, error: targetError } = await db
+    .from("broker_connections")
+    .select("id,broker_id,environment")
+    .eq("id", targetId)
+    .maybeSingle();
+  if (targetError || !target || target.broker_id !== "dhan" || target.environment !== "production") {
+    throw new Error("Global production Dhan connection was not found.");
+  }
+
+  const { data: source, error: sourceError } = await db
+    .from("broker_credentials")
+    .select("id,trading_account_id,broker_id,label,encrypted_credentials,is_active,is_connected,last_tested_at,environment")
+    .eq("id", sourceId)
+    .eq("broker_id", "dhan")
+    .eq("environment", "production")
+    .eq("label", "FundedWealth Global Dhan Market Data")
+    .is("trading_account_id", null)
+    .eq("is_active", true)
+    .eq("is_connected", true)
+    .not("last_tested_at", "is", null)
+    .maybeSingle();
+  if (sourceError || !source || source.trading_account_id !== null) {
+    throw new Error("No tested, connected, unbound Founder Dhan credential is available to migrate.");
+  }
+
+  let credentials: BrokerCredentialMap;
+  try {
+    credentials = await decryptCredentials(source.encrypted_credentials);
+  } catch {
+    throw new Error("The saved global Dhan credential could not be decrypted.");
+  }
+  validateCredentials("dhan", credentials);
+  const encryptedCredentials = await encryptCredentials(credentials);
+  const updatedAt = new Date().toISOString();
+  const { data: updated, error: updateError } = await db
+    .from("broker_connections")
+    .update({
+      encrypted_credentials: encryptedCredentials,
+      is_active: false,
+      is_connected: false,
+      connection_status: "untested",
+      last_tested_at: null,
+      last_test_result: null,
+      health_metadata: {},
+      updated_by: employeeId,
+      updated_at: updatedAt,
+    })
+    .eq("id", targetId)
+    .eq("broker_id", "dhan")
+    .eq("environment", "production")
+    .select("id")
+    .maybeSingle();
+  if (updateError || !updated) throw new Error("Failed to re-encrypt the global Dhan credential.");
+
+  return { source_id: source.id, target_id: updated.id };
+}
+
 export async function activateCentralBrokerConnection(id: string, employeeId: string): Promise<{ broker_id: BrokerId; environment: string }> {
   const db = createServerSupabaseClient();
   const { data: target, error: targetError } = await db
