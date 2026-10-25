@@ -8,6 +8,7 @@ export interface MarketInstrument {
   exchange: string;
   exchangeSegment: string;
   instrumentType: string;
+  series?: string;
   lotSize?: number;
   tickSize?: number;
   expiryDate?: string;
@@ -110,6 +111,7 @@ export interface MarketOptionChain {
 export interface MarketDataProvider {
   authenticate(): Promise<{ authenticated: true }>;
   searchInstruments(query: string): Promise<MarketInstrument[]>;
+  getInstrumentCatalog?(): Promise<MarketInstrument[]>;
   getQuote(instrument: MarketInstrument): Promise<MarketQuote>;
   getHistoricalCandles(
     instrument: MarketInstrument,

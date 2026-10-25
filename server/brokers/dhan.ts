@@ -16,6 +16,8 @@ import type {
 const DHAN_API = "https://api.dhan.co/v2";
 const DHAN_INSTRUMENT_MASTER = "https://images.dhan.co/api-data/api-scrip-master.csv";
 const DHAN_SEGMENTS = new Set(["IDX_I", "NSE_EQ", "NSE_FNO", "BSE_EQ", "BSE_FNO", "MCX_COMM"]);
+const NSE_EQUITY_SERIES = new Set(["EQ", "BE", "BZ", "IV", "RR", "SM", "ST", "X", "XT"]);
+const BSE_EQUITY_SERIES = new Set(["A", "B", "IF", "NS", "NT", "T", "X", "XT", "Z"]);
 const OPTION_UNDERLYINGS: Record<string, number> = { NIFTY: 13, BANKNIFTY: 25, FINNIFTY: 27, MIDCPNIFTY: 442 };
 const INTERVALS: Record<string, string> = {
   "1m": "1", "1": "1", "5m": "5", "5": "5", "15m": "15", "15": "15",
@@ -40,10 +42,17 @@ function requireValue(value: number | null, provider: "dhan"): number {
   return value;
 }
 
+type InstrumentMasterCache = {
+  expiresAt: number;
+  rows?: MarketInstrument[];
+  pending?: Promise<MarketInstrument[]>;
+};
+
+const instrumentMasterCache = new WeakMap<Fetcher, InstrumentMasterCache>();
+
 export class DhanMarketDataProvider implements MarketDataProvider {
   private readonly clientId: string;
   private readonly accessToken: string;
-  private instrumentCache: { expiresAt: number; rows: MarketInstrument[] } | null = null;
 
   constructor(credentials: BrokerCredentialMap, private readonly fetcher: Fetcher = fetch) {
     this.clientId = credential(credentials, "client_id", "clientId");
@@ -70,6 +79,45 @@ export class DhanMarketDataProvider implements MarketDataProvider {
       instrument.symbol.toUpperCase().includes(needle) ||
       instrument.tradingSymbol.toUpperCase().includes(needle)
     ).slice(0, 50);
+  }
+
+  async getInstrumentCatalog(): Promise<MarketInstrument[]> {
+    const instruments = await this.getInstrumentMaster();
+    const catalog = instruments.filter((instrument) => {
+      if (instrument.instrumentType === "EQUITY") {
+        const series = instrument.series?.toUpperCase();
+        if (instrument.exchangeSegment === "NSE_EQ") return Boolean(series && NSE_EQUITY_SERIES.has(series));
+        if (instrument.exchangeSegment === "BSE_EQ") return Boolean(series && BSE_EQUITY_SERIES.has(series));
+      }
+      if (instrument.exchangeSegment === "IDX_I" && instrument.instrumentType === "INDEX") return true;
+      if (
+        ["NSE_FNO", "BSE_FNO"].includes(instrument.exchangeSegment) &&
+        ["FUTSTK", "FUTIDX"].includes(instrument.instrumentType) &&
+        instrument.expiryDate &&
+        Date.parse(instrument.expiryDate) >= Date.now()
+      ) {
+        return true;
+      }
+      return false;
+    });
+    const optionContracts = new Map<string, MarketInstrument>();
+    for (const instrument of instruments) {
+      const expiry = instrument.expiryDate ? Date.parse(instrument.expiryDate) : Number.NaN;
+      if (
+        !["OPTSTK", "OPTIDX"].includes(instrument.instrumentType) ||
+        !instrument.strikePrice ||
+        !["CE", "PE"].includes(instrument.optionType?.toUpperCase() ?? "") ||
+        !Number.isFinite(expiry) ||
+        expiry < Date.now()
+      ) {
+        continue;
+      }
+
+      const key = `${instrument.exchangeSegment}:${instrument.symbol}:${instrument.optionType}`;
+      const current = optionContracts.get(key);
+      if (!current || expiry < Date.parse(current.expiryDate ?? "")) optionContracts.set(key, instrument);
+    }
+    return [...catalog, ...optionContracts.values()];
   }
 
   async getQuote(instrument: MarketInstrument): Promise<MarketQuote> {
@@ -225,14 +273,27 @@ export class DhanMarketDataProvider implements MarketDataProvider {
   }
 
   private async getInstrumentMaster(): Promise<MarketInstrument[]> {
-    if (this.instrumentCache && this.instrumentCache.expiresAt > Date.now()) {
-      return this.instrumentCache.rows;
+    const cached = instrumentMasterCache.get(this.fetcher);
+    if (cached?.rows && cached.expiresAt > Date.now()) return cached.rows;
+    if (cached?.pending) return cached.pending;
+
+    const pending = (async () => {
+      const response = await this.fetcher(DHAN_INSTRUMENT_MASTER, { headers: { Accept: "text/csv" }, cache: "no-store" });
+      if (!response.ok) throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR", response.status);
+      return parseCsv(await response.text())
+        .map((row) => this.toInstrument(row))
+        .filter((row): row is MarketInstrument => row !== null);
+    })();
+    instrumentMasterCache.set(this.fetcher, { expiresAt: 0, pending });
+
+    try {
+      const rows = await pending;
+      instrumentMasterCache.set(this.fetcher, { rows, expiresAt: Date.now() + 60 * 60 * 1000 });
+      return rows;
+    } catch (error) {
+      instrumentMasterCache.delete(this.fetcher);
+      throw error;
     }
-    const response = await this.fetcher(DHAN_INSTRUMENT_MASTER, { headers: { Accept: "text/csv" }, cache: "no-store" });
-    if (!response.ok) throw new MarketDataProviderError("dhan", "UPSTREAM_ERROR", response.status);
-    const rows = parseCsv(await response.text()).map((row) => this.toInstrument(row)).filter((row): row is MarketInstrument => row !== null);
-    this.instrumentCache = { rows, expiresAt: Date.now() + 60 * 60 * 1000 };
-    return rows;
   }
 
   private toInstrument(row: Record<string, string>): MarketInstrument | null {
@@ -253,11 +314,12 @@ export class DhanMarketDataProvider implements MarketDataProvider {
     return {
       provider: "dhan",
       providerInstrumentId: securityId,
-      symbol: row.SEM_INSTRUMENT_NAME || tradingSymbol,
+      symbol: row.SM_SYMBOL_NAME || tradingSymbol,
       tradingSymbol,
       exchange,
       exchangeSegment,
-      instrumentType: row.SEM_EXM_INSTRUMENT_TYPE || (exchangeSegment === "IDX_I" ? "INDEX" : "EQUITY"),
+      instrumentType: row.SEM_EXCH_INSTRUMENT_TYPE?.toUpperCase() || (exchangeSegment === "IDX_I" ? "INDEX" : "EQUITY"),
+      series: row.SEM_SERIES?.toUpperCase() || undefined,
       lotSize: numeric(row.SEM_LOT_UNITS) ?? undefined,
       tickSize: numeric(row.SEM_TICK_SIZE) ?? undefined,
       expiryDate: row.SEM_EXPIRY_DATE || undefined,

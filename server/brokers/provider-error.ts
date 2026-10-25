@@ -5,6 +5,7 @@ export type MarketDataErrorCode =
   | "INVALID_CREDENTIALS"
   | "INVALID_REQUEST"
   | "INVALID_INSTRUMENT"
+  | "PROVIDER_UNAVAILABLE"
   | "UPSTREAM_ERROR"
   | "CREDENTIAL_STORAGE_ERROR"
   | "ACCOUNT_NOT_FOUND"
@@ -16,6 +17,7 @@ const PUBLIC_MESSAGES: Record<MarketDataErrorCode, string> = {
   INVALID_CREDENTIALS: "Broker authentication failed.",
   INVALID_REQUEST: "The market-data request is invalid.",
   INVALID_INSTRUMENT: "The requested instrument is invalid or unavailable.",
+  PROVIDER_UNAVAILABLE: "The requested market-data provider is unavailable.",
   UPSTREAM_ERROR: "The broker market-data service could not complete the request.",
   CREDENTIAL_STORAGE_ERROR: "Broker credentials could not be loaded securely.",
   ACCOUNT_NOT_FOUND: "The trading account was not found or is not accessible.",

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   authorizeMarketDataAccount: vi.fn(),
   createStoredMarketDataProvider: vi.fn(),
   getMarketDataCredentialStatus: vi.fn(),
+  getCentralMarketDataCredentialStatus: vi.fn(),
   recordMarketDataAuthentication: vi.fn(),
   serverLog: vi.fn(),
 }));
@@ -15,6 +16,9 @@ vi.mock("@/server/brokers/provider-factory", () => ({ createStoredMarketDataProv
 vi.mock("@/server/services/broker-credentials", () => ({
   getMarketDataCredentialStatus: mocks.getMarketDataCredentialStatus,
   recordMarketDataAuthentication: mocks.recordMarketDataAuthentication,
+}));
+vi.mock("@/server/services/broker-connections", () => ({
+  getCentralMarketDataCredentialStatus: mocks.getCentralMarketDataCredentialStatus,
 }));
 vi.mock("@/lib/logger", () => ({ serverLog: mocks.serverLog }));
 
@@ -39,6 +43,16 @@ const provider = {
     exchange: "NSE",
     exchangeSegment: "IDX_I",
     instrumentType: "INDEX",
+  }]),
+  getInstrumentCatalog: vi.fn(async () => [{
+    provider: "dhan" as "dhan" | "kite",
+    providerInstrumentId: "2885",
+    symbol: "RELIANCE",
+    tradingSymbol: "RELIANCE",
+    exchange: "NSE",
+    exchangeSegment: "NSE_EQ",
+    instrumentType: "EQUITY",
+    series: "EQ",
   }]),
   getQuote: vi.fn(async () => ({
     provider: "dhan" as "dhan" | "kite",
@@ -105,6 +119,7 @@ beforeEach(() => {
   mocks.authorizeMarketDataAccount.mockResolvedValue(account);
   mocks.createStoredMarketDataProvider.mockResolvedValue(provider);
   mocks.getMarketDataCredentialStatus.mockResolvedValue({ configured: true, is_connected: true, last_tested_at: "2026-09-29T00:00:00.000Z", last_test_result: "Authentication successful." });
+  mocks.getCentralMarketDataCredentialStatus.mockResolvedValue({ configured: true, is_connected: true, last_tested_at: "2026-09-29T00:00:00.000Z", last_test_result: "Authentication successful." });
 });
 
 describe("authenticated global market-data API", () => {
@@ -142,7 +157,7 @@ describe("authenticated global market-data API", () => {
     expect(response.status).toBe(200);
     expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
     expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith(undefined, "dhan", "production");
-    expect(mocks.recordMarketDataAuthentication).toHaveBeenCalledWith(undefined, "dhan", "production", true, "Authentication successful.");
+    expect(mocks.recordMarketDataAuthentication).not.toHaveBeenCalled();
   });
 
   it("serves global instrument search without a customer trading account", async () => {
@@ -152,6 +167,28 @@ describe("authenticated global market-data API", () => {
     expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
     expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith(undefined, "dhan", "production");
     expect((await responseBody(response)).data[0]).toMatchObject({ provider: "dhan", symbol: "NIFTY" });
+  });
+
+  it("rejects empty search queries in favor of the bounded catalog operation", async () => {
+    const response = await POST(post({ provider: "dhan", operation: "searchInstruments", query: "" }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.createStoredMarketDataProvider).not.toHaveBeenCalled();
+  });
+
+  it("serves the bounded global Dhan catalog without a customer trading account", async () => {
+    const response = await POST(post({ provider: "dhan", operation: "listInstruments" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
+    expect(mocks.createStoredMarketDataProvider).toHaveBeenCalledWith(undefined, "dhan", "production");
+    expect(provider.getInstrumentCatalog).toHaveBeenCalledTimes(1);
+    expect((await responseBody(response)).data[0]).toMatchObject({
+      provider: "dhan",
+      symbol: "RELIANCE",
+      exchangeSegment: "NSE_EQ",
+      series: "EQ",
+    });
   });
 
   it("rejects another customer's account before provider construction", async () => {
@@ -333,7 +370,7 @@ describe("authenticated global market-data API", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.authorizeMarketDataAccount).not.toHaveBeenCalled();
-    expect(mocks.getMarketDataCredentialStatus).toHaveBeenCalledWith(undefined, "dhan", "paper");
+    expect(mocks.getCentralMarketDataCredentialStatus).toHaveBeenCalledWith({ broker_id: "dhan", environment: "paper" });
     expect((await responseBody(response)).data).toMatchObject({ provider: "dhan", environment: "paper", configured: true, is_connected: true });
   });
 

@@ -36,6 +36,7 @@ const InstrumentSchema = z.object({
 const RequestSchema = z.discriminatedUnion("operation", [
   z.object({ account_id: z.string().uuid().optional(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("authenticate") }),
   z.object({ account_id: z.string().uuid().optional(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("searchInstruments"), query: z.string().trim().min(1).max(100) }),
+  z.object({ account_id: z.string().uuid().optional(), provider: z.literal("dhan"), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("listInstruments") }),
   z.object({ account_id: z.string().uuid().optional(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getQuote"), instrument: InstrumentSchema }),
   z.object({ account_id: z.string().uuid().optional(), provider: z.enum(["dhan", "kite"]), environment: z.enum(["production", "paper", "sandbox"]).default("production"), operation: z.literal("getOptionChain"), underlying: z.string().trim().min(1).max(32), expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
   z.object({
@@ -73,6 +74,7 @@ function errorStatus(error: MarketDataProviderError): number {
   if (error.code === "ACCOUNT_NOT_FOUND") return 403;
   if (error.code === "ACCOUNT_INACTIVE") return 403;
   if (error.code === "INVALID_REQUEST" || error.code === "INVALID_INSTRUMENT") return 400;
+  if (error.code === "PROVIDER_UNAVAILABLE") return 503;
   if (error.code === "INVALID_PROVIDER_ACCOUNT") return 409;
   return 502;
 }
@@ -157,6 +159,15 @@ export async function POST(req: Request): Promise<NextResponse> {
         break;
       case "searchInstruments":
         data = (await provider.searchInstruments(request.query)).map((instrument) => {
+          if (instrument.provider !== request.provider) throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
+          return normalizeMarketInstrument(instrument);
+        });
+        break;
+      case "listInstruments":
+        if (!provider.getInstrumentCatalog) {
+          throw new MarketDataProviderError(request.provider, "PROVIDER_UNAVAILABLE");
+        }
+        data = (await provider.getInstrumentCatalog()).map((instrument) => {
           if (instrument.provider !== request.provider) throw new MarketDataProviderError(request.provider, "INVALID_INSTRUMENT");
           return normalizeMarketInstrument(instrument);
         });

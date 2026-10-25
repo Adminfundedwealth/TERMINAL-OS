@@ -47,9 +47,9 @@ describe("Dhan read-only market data provider", () => {
 
   it("searches the real Dhan scrip master", async () => {
     const csv = [
-      "SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_EXM_INSTRUMENT_TYPE,SEM_TRADING_SYMBOL,SEM_LOT_UNITS,SEM_TICK_SIZE",
-      "NSE,I,13,NIFTY 50,INDEX,NIFTY,1,0.05",
-      "NSE,E,25,BANKNIFTY,EQUITY,BANKNIFTY,1,0.05",
+      "SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_EXCH_INSTRUMENT_TYPE,SEM_TRADING_SYMBOL,SEM_LOT_UNITS,SEM_TICK_SIZE,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_SERIES,SM_SYMBOL_NAME",
+      "NSE,I,13,INDEX,INDEX,NIFTY,1,0.05,,,,,NIFTY",
+      "NSE,E,25,EQUITY,EQUITY,BANKNIFTY,1,0.05,,,,EQ,BANKNIFTY",
     ].join("\n");
     const fetcher = vi.fn<Fetcher>(async () => new Response(csv, { status: 200 }));
     const provider = new DhanMarketDataProvider(dhanCredentials, fetcher);
@@ -58,7 +58,44 @@ describe("Dhan read-only market data provider", () => {
 
     expect(String(fetcher.mock.calls[0][0])).toContain("api-scrip-master.csv");
     expect(instruments).toHaveLength(2);
-    expect(instruments[0]).toMatchObject({ provider: "dhan", providerInstrumentId: "13", exchangeSegment: "IDX_I" });
+    expect(instruments[0]).toMatchObject({ provider: "dhan", providerInstrumentId: "13", exchangeSegment: "IDX_I", symbol: "NIFTY", instrumentType: "INDEX" });
+    expect(instruments[1]).toMatchObject({ providerInstrumentId: "25", symbol: "BANKNIFTY", instrumentType: "EQUITY", series: "EQ" });
+  });
+
+  it("rejects empty search queries instead of returning an unbounded master", async () => {
+    const fetcher = vi.fn<Fetcher>();
+    const provider = new DhanMarketDataProvider(dhanCredentials, fetcher);
+
+    await expect(provider.searchInstruments("")).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("provides a bounded cash, index, and unexpired futures catalog from one shared master fetch", async () => {
+    const csv = [
+      "SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_EXCH_INSTRUMENT_TYPE,SEM_TRADING_SYMBOL,SEM_LOT_UNITS,SEM_TICK_SIZE,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_SERIES,SM_SYMBOL_NAME",
+      "NSE,E,2885,EQUITY,EQUITY,RELIANCE,1,0.05,,,,EQ,RELIANCE",
+      "NSE,I,13,INDEX,INDEX,NIFTY,1,0.05,,,,,NIFTY",
+      "NSE,D,123,FUTSTK,FUTSTK,RELIANCE-2099-FUT,1,0.05,2099-12-31 14:30:00,,XX,,RELIANCE",
+      "NSE,D,124,FUTSTK,FUTSTK,RELIANCE-2000-FUT,1,0.05,2000-12-31 14:30:00,,XX,,RELIANCE",
+      "NSE,D,125,OPTSTK,OPTSTK,RELIANCE-2099-CE,1,0.05,2099-12-31 14:30:00,1000,CE,,RELIANCE",
+      "NSE,D,126,OPTSTK,OPTSTK,RELIANCE-2099-CE2,1,0.05,2099-12-31 14:30:00,2000,CE,,RELIANCE",
+    ].join("\n");
+    const fetcher = vi.fn<Fetcher>(async () => new Response(csv, { status: 200 }));
+    const firstProvider = new DhanMarketDataProvider(dhanCredentials, fetcher);
+    const secondProvider = new DhanMarketDataProvider(dhanCredentials, fetcher);
+
+    const instruments = await firstProvider.getInstrumentCatalog();
+    const cachedInstruments = await secondProvider.getInstrumentCatalog();
+
+    expect(instruments).toMatchObject([
+      { providerInstrumentId: "2885", symbol: "RELIANCE", instrumentType: "EQUITY", series: "EQ" },
+      { providerInstrumentId: "13", symbol: "NIFTY", instrumentType: "INDEX" },
+      { providerInstrumentId: "123", symbol: "RELIANCE", instrumentType: "FUTSTK" },
+      { providerInstrumentId: "125", symbol: "RELIANCE", instrumentType: "OPTSTK", optionType: "CE" },
+    ]);
+    expect(instruments.map((instrument) => instrument.providerInstrumentId)).toEqual(["2885", "13", "123", "125"]);
+    expect(cachedInstruments).toEqual(instruments);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes Dhan quote/LTP data", async () => {
