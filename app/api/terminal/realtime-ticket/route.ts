@@ -6,10 +6,10 @@ import { authorizeMarketDataAccount } from "@/server/services/market-data-access
 import { issueRealtimeTicket } from "@/server/brokers/realtime-ticket";
 
 const RequestSchema = z.object({
-  account_id: z.string().uuid(),
+  account_id: z.string().uuid().optional(),
   provider: z.enum(["dhan", "kite"]),
   environment: z.enum(["production", "paper", "sandbox"]).default("production"),
-}).strict();
+}).strict().refine((request) => request.provider === "dhan" || Boolean(request.account_id));
 
 function json(req: Request, body: unknown, status = 200): NextResponse {
   return NextResponse.json(body, {
@@ -39,14 +39,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   const parsed = RequestSchema.safeParse(body);
   if (!parsed.success) return json(req, { error: { code: "INVALID_REQUEST", message: "Invalid realtime ticket request." } }, 400);
 
+  const accountId = parsed.data.account_id ?? null;
   const secret = process.env.REALTIME_TICKET_SECRET;
   if (!secret) return json(req, { error: { code: "REALTIME_UNAVAILABLE", message: "Realtime ticket service is unavailable." } }, 503);
 
   try {
-    await authorizeMarketDataAccount(customer.accessToken, customer.userId, parsed.data.account_id, parsed.data.provider);
+    if (accountId) {
+      await authorizeMarketDataAccount(customer.accessToken, customer.userId, accountId, parsed.data.provider);
+    }
     const { ticket, claims } = issueRealtimeTicket({
       sub: customer.userId,
-      account_id: parsed.data.account_id,
+      account_id: accountId,
       provider: parsed.data.provider,
       environment: parsed.data.environment,
     }, secret);

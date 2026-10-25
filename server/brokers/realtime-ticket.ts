@@ -6,13 +6,21 @@ export const REALTIME_TICKET_TTL_SECONDS = 90;
 const TicketPayloadSchema = z.object({
   iss: z.literal("terminal-os"),
   sub: z.string().uuid(),
-  account_id: z.string().uuid(),
+  account_id: z.string().uuid().nullable(),
   provider: z.enum(["dhan", "kite"]),
   environment: z.enum(["production", "paper", "sandbox"]),
   jti: z.string().uuid(),
   iat: z.number().int().positive(),
   exp: z.number().int().positive(),
-}).strict();
+}).strict().superRefine((claims, context) => {
+  if (!claims.account_id && claims.provider !== "dhan") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["account_id"],
+      message: "An account is required for account-scoped realtime providers.",
+    });
+  }
+});
 
 export type RealtimeTicketClaims = z.infer<typeof TicketPayloadSchema>;
 

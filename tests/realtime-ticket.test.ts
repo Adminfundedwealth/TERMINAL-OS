@@ -18,6 +18,27 @@ describe("realtime ticket", () => {
     expect(JSON.stringify(claims)).not.toMatch(/credential|access_token|api_key/i);
   });
 
+  it("issues a global Dhan ticket without a trading-account scope", () => {
+    const { ticket, claims } = issueRealtimeTicket({
+      sub: scope.sub,
+      account_id: null,
+      provider: "dhan",
+      environment: "production",
+    }, secret, now);
+
+    expect(verifyRealtimeTicket(ticket, secret, { now })).toEqual(claims);
+    expect(claims.account_id).toBeNull();
+  });
+
+  it("rejects accountless tickets for account-scoped providers", () => {
+    expect(() => issueRealtimeTicket({
+      sub: scope.sub,
+      account_id: null,
+      provider: "kite",
+      environment: "production",
+    }, secret, now)).toThrow();
+  });
+
   it("rejects tampered tickets and invalid signing secrets", () => {
     const { ticket } = issueRealtimeTicket(scope, secret, now);
     expect(() => verifyRealtimeTicket(`${ticket.slice(0, -1)}x`, secret, { now })).toThrow("Invalid realtime ticket");

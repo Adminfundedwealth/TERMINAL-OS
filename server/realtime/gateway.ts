@@ -112,7 +112,7 @@ export function createRealtimeGateway(options: GatewayOptions): { wss: WebSocket
         socket.close(4003, "Unauthenticated");
         return;
       }
-      if (message.account_id !== claims.account_id || message.provider !== claims.provider || message.environment !== claims.environment) {
+      if ((message.account_id ?? null) !== claims.account_id || message.provider !== claims.provider || message.environment !== claims.environment) {
         safeSend(socket, { type: "error", code: "ACCOUNT_FORBIDDEN", message: "Subscription is outside the ticket scope.", request_id: message.request_id, retryable: false });
         return;
       }

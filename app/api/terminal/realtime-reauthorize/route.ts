@@ -26,6 +26,15 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   try {
     const claims = verifyRealtimeTicket(parsed.data.ticket, ticketSecret, { allowExpired: true });
+    if (!claims.account_id) {
+      if (claims.provider !== "dhan") return NextResponse.json({ authorized: false }, { status: 403 });
+      const credentials = await getActiveCentralMarketDataCredentials({
+        broker_id: "dhan",
+        environment: claims.environment,
+      });
+      if (!credentials) return NextResponse.json({ authorized: false }, { status: 403 });
+      return NextResponse.json({ authorized: true, credentials }, { headers: { "Cache-Control": "no-store" } });
+    }
     const db = createServerSupabaseClient();
     const { data, error } = await db.rpc("get_active_account_context", { requested_account_id: claims.account_id });
     const account = (data as { account?: { id?: string; owner_user_id?: string; status?: string; is_active?: boolean } } | null)?.account;

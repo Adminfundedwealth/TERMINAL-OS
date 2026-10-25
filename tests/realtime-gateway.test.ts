@@ -116,6 +116,34 @@ describe("persistent realtime gateway", () => {
     expect(reauthorize).toHaveBeenCalledTimes(2);
   });
 
+  it("streams global Dhan data for an authenticated user without an account", async () => {
+    const { connect } = await setup();
+    const socket = await connect();
+    const globalScope = {
+      sub: scope.sub,
+      account_id: null,
+      provider: "dhan" as const,
+      environment: "production" as const,
+    };
+    const ticket = issueRealtimeTicket(globalScope, secret).ticket;
+    expect((await authenticate(socket, ticket)).status).toBe("ready");
+
+    const quote = waitForMessage(socket, (message) => message.type === "index");
+    const ack = waitForMessage(socket, (message) => message.type === "subscription");
+    socket.send(JSON.stringify({
+      type: "subscription",
+      action: "subscribe",
+      request_id: "33333333-3333-4333-8333-333333333335",
+      account_id: null,
+      provider: "dhan",
+      environment: "production",
+      instruments: [instrument],
+    }));
+
+    expect((await quote).account_id).toBeNull();
+    expect((await ack)).toMatchObject({ status: "subscribed", account_id: null, provider: "dhan" });
+  });
+
   it("rejects replayed tickets and subscriptions outside the ticket account scope", async () => {
     const { connect } = await setup();
     const ticket = issueRealtimeTicket(scope, secret).ticket;
