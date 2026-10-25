@@ -25,6 +25,20 @@ export interface BrokerConnectionScope {
   environment: "production" | "paper" | "sandbox";
 }
 
+const CENTRAL_CREDENTIAL_LOOKUP_TIMEOUT_MS = 8_000;
+
+function centralCredentialLookupSignal(): AbortSignal {
+  return AbortSignal.timeout(CENTRAL_CREDENTIAL_LOOKUP_TIMEOUT_MS);
+}
+
+function logCentralCredentialLookupFailure(scope: BrokerConnectionScope): void {
+  serverLog("error", "broker", "central_market_data_credential_lookup_failed", {
+    broker_id: scope.broker_id,
+    environment: scope.environment,
+    error_code: "CREDENTIAL_STORAGE_ERROR",
+  });
+}
+
 function validateCredentials(brokerId: BrokerId, credentials: BrokerCredentialMap): void {
   if (Object.keys(credentials).length === 0 || Object.values(credentials).some((value) => !value.trim())) {
     throw new Error("Broker credentials must not be empty.");
@@ -447,8 +461,13 @@ export async function getActiveCentralMarketDataCredentials(
     .eq("is_connected", true)
     .eq("connection_status", "connected")
     .not("last_tested_at", "is", null)
+    .abortSignal(centralCredentialLookupSignal())
     .maybeSingle();
-  if (error || !data?.encrypted_credentials) {
+  if (error) {
+    logCentralCredentialLookupFailure(scope);
+    throw new MarketDataProviderError(provider, "CREDENTIAL_STORAGE_ERROR");
+  }
+  if (!data?.encrypted_credentials) {
     throw new MarketDataProviderError(provider, "MISSING_CREDENTIALS");
   }
   try {
@@ -467,8 +486,12 @@ export async function getCentralMarketDataCredentialStatus(
     .select("is_active, is_connected, connection_status, last_tested_at")
     .eq("broker_id", scope.broker_id)
     .eq("environment", scope.environment)
+    .abortSignal(centralCredentialLookupSignal())
     .maybeSingle();
-  if (error) throw new MarketDataProviderError(scope.broker_id === "zerodha" ? "kite" : "dhan", "CREDENTIAL_STORAGE_ERROR");
+  if (error) {
+    logCentralCredentialLookupFailure(scope);
+    throw new MarketDataProviderError(scope.broker_id === "zerodha" ? "kite" : "dhan", "CREDENTIAL_STORAGE_ERROR");
+  }
   const connected = data?.is_active === true
     && data.is_connected === true
     && data.connection_status === "connected"

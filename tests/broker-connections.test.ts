@@ -21,6 +21,7 @@ import {
   deactivateCentralBrokerConnection,
   getCentralCredentialsForAccount,
   getActiveCentralMarketDataCredentials,
+  getCentralMarketDataCredentialStatus,
   reencryptUnboundFounderDhanCredential,
   testCentralBrokerConnection,
   type BrokerConnectionScope,
@@ -28,12 +29,13 @@ import {
 import { PERMISSIONS, hasPermission } from "@/lib/rbac/permissions";
 import type { BrokerId } from "@/types/broker";
 
-function chain(result: { data?: unknown; error: null }) {
+function chain(result: { data?: unknown; error: unknown }) {
   const query: Record<string, any> = {};
   query.select = vi.fn(() => query);
   query.eq = vi.fn(() => query);
   query.is = vi.fn(() => query);
   query.not = vi.fn(() => query);
+  query.abortSignal = vi.fn(() => query);
   query.maybeSingle = vi.fn(async () => result);
   query.insert = vi.fn(() => query);
   query.update = vi.fn(() => query);
@@ -129,6 +131,28 @@ describe("FundedWealth central broker connections", () => {
     })).rejects.toMatchObject({ code: "MISSING_CREDENTIALS" });
     expect(db.from).toHaveBeenCalledTimes(1);
     expect(db.from).toHaveBeenCalledWith("broker_connections");
+  });
+
+  it("bounds central credential lookups and reports storage failures distinctly", async () => {
+    const query = chain({ data: null, error: { message: "request aborted" } });
+    const db = { from: vi.fn(() => query) };
+    vi.mocked(mockedCreateServerSupabaseClient).mockReturnValue(db as never);
+
+    await expect(getActiveCentralMarketDataCredentials({
+      broker_id: "dhan",
+      environment: "production",
+    })).rejects.toMatchObject({ code: "CREDENTIAL_STORAGE_ERROR" });
+
+    expect(query.abortSignal).toHaveBeenCalledTimes(1);
+
+    await expect(getCentralMarketDataCredentialStatus({
+      broker_id: "dhan",
+      environment: "production",
+    })).rejects.toMatchObject({ code: "CREDENTIAL_STORAGE_ERROR" });
+
+    expect(query.abortSignal).toHaveBeenCalledTimes(2);
+    expect(serverLog).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(vi.mocked(serverLog).mock.calls)).not.toContain("request aborted");
   });
 
   it("re-encrypts only the tested unbound Founder Dhan credential into the global connection", async () => {
